@@ -220,6 +220,31 @@ body {
 .heat-cell.down { background: rgba(255,82,82,0.06); border-color: rgba(255,82,82,0.12); color: var(--red); }
 .heat-cell.flat { background: rgba(255,171,64,0.06); border-color: rgba(255,171,64,0.12); color: var(--amber); }
 
+/* ── MARKET SUMMARY ── */
+.market-summary {
+  background: var(--card2); border-radius: var(--radius-sm);
+  padding: 16px 20px; font-size: 13px; color: var(--text-dim);
+  line-height: 1.7; border-left: 3px solid var(--blue); margin-bottom: 16px;
+}
+
+/* ── NEWS ── */
+.news-item {
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.news-item:last-child { border-bottom: none; }
+.news-dot {
+  width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+}
+.news-dot.negative { background: var(--red); }
+.news-dot.positive { background: var(--green); }
+.news-dot.neutral { background: var(--amber); }
+.news-headline { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.news-headline a { color: var(--text); text-decoration: none; transition: color 0.2s; }
+.news-headline a:hover { color: var(--blue); }
+.news-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.news-summary { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
 /* ── BOTTOM LINE ── */
 .bottom-line {
   background: linear-gradient(135deg, rgba(68,138,255,0.08) 0%, var(--card) 50%, rgba(179,136,255,0.05) 100%);
@@ -302,6 +327,9 @@ body {
     </div>
   </div>
 
+  <!-- ═══ MARKET SUMMARY ═══ -->
+  <div class="market-summary" id="market-summary">Loading market summary...</div>
+
   <!-- ═══ MAJOR INDICES ═══ -->
   <div class="section-title">MAJOR INDICES</div>
   <div class="grid grid-3" id="indices-grid" style="margin-bottom: 24px;">
@@ -328,6 +356,12 @@ body {
     <div class="heatmap-grid" id="sector-grid">
       <div class="loading-text" style="grid-column: 1/-1;">Loading sector data...</div>
     </div>
+  </div>
+
+  <!-- ═══ KEY NEWS ═══ -->
+  <div class="section-title">KEY NEWS</div>
+  <div class="card" id="news-card" style="margin-bottom: 24px;">
+    <div class="loading-text">Loading market news...</div>
   </div>
 
   <!-- ═══ BOTTOM LINE ═══ -->
@@ -371,6 +405,67 @@ const SECTOR_ETFS = [
 ];
 
 let allData = {};
+let newsData = [];
+
+// ═══════════════════════════════════════
+// NEWS FETCH (Yahoo Finance RSS)
+// ═══════════════════════════════════════
+async function fetchNews() {
+  // Try MarketWatch RSS first, then CNBC as fallback
+  const feeds = [
+    'https://feeds.marketwatch.com/marketwatch/topstories/',
+    'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114',
+  ];
+  for (const feedUrl of feeds) {
+    try {
+      const resp = await fetch(CORS_PROXY + encodeURIComponent(feedUrl));
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      const items = xml.querySelectorAll('item');
+      if (items.length === 0) continue;
+      const news = [];
+      items.forEach((item, i) => {
+        if (i >= 8) return;
+        const title = item.querySelector('title')?.textContent || '';
+        const link = item.querySelector('link')?.textContent || '';
+        const pubDate = item.querySelector('pubDate')?.textContent || '';
+        const desc = item.querySelector('description')?.textContent || '';
+        // Sentiment from keywords
+        const lc = (title + ' ' + desc).toLowerCase();
+        let sentiment = 'neutral';
+        const bearWords = ['drop', 'fall', 'crash', 'sink', 'plunge', 'down', 'loss', 'fear', 'sell', 'decline', 'tumble', 'slide', 'slump', 'war', 'risk', 'warn', 'cut', 'bear', 'recession', 'inflation', 'tariff', 'threat', 'correction', 'shutdown'];
+        const bullWords = ['rally', 'surge', 'gain', 'rise', 'jump', 'bull', 'buy', 'high', 'record', 'boom', 'soar', 'beat', 'growth', 'optimis', 'opportunity', 'rebound'];
+        const bearScore = bearWords.filter(w => lc.includes(w)).length;
+        const bullScore = bullWords.filter(w => lc.includes(w)).length;
+        if (bearScore > bullScore) sentiment = 'negative';
+        else if (bullScore > bearScore) sentiment = 'positive';
+        const ago = pubDate ? timeAgo(new Date(pubDate)) : '';
+        news.push({ title, link, pubDate: ago, publisher: 'MarketWatch', description: '', sentiment });
+      });
+      if (news.length > 0) return news;
+    } catch (e) { continue; }
+  }
+  console.warn('All news feeds failed');
+  return [];
+}
+
+function cleanHTML(str) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = str;
+  const text = tmp.textContent || tmp.innerText || '';
+  return text.length > 150 ? text.substring(0, 150) + '...' : text;
+}
+
+function timeAgo(date) {
+  const now = new Date();
+  const diff = Math.floor((now - date) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
 
 // ═══════════════════════════════════════
 // YAHOO FINANCE FETCH
@@ -684,6 +779,61 @@ function renderSectors(sectorData) {
   }).join('');
 }
 
+function renderMarketSummary(tickerData, fg, vixData) {
+  const el = document.getElementById('market-summary');
+  const spy = tickerData['SPY'];
+  const qqq = tickerData['QQQ'];
+  const dia = tickerData['DIA'];
+  if (!spy) { el.textContent = 'Market summary unavailable.'; return; }
+
+  const fgScore = fg ? Math.round(fg.score) : null;
+  const vix = vixData ? vixData.currentPrice : null;
+
+  // Determine market state
+  let state = '';
+  if (spy.dayChange < -1) state = `closed sharply lower with the S&P 500 falling ${fmtPct(spy.dayChange)}`;
+  else if (spy.dayChange < -0.3) state = `closed modestly lower with the S&P 500 down ${fmtPct(spy.dayChange)}`;
+  else if (spy.dayChange > 1) state = `rallied strongly with the S&P 500 gaining ${fmtPct(spy.dayChange)}`;
+  else if (spy.dayChange > 0.3) state = `closed higher with the S&P 500 up ${fmtPct(spy.dayChange)}`;
+  else state = `closed roughly flat with the S&P 500 at ${fmtPct(spy.dayChange)}`;
+
+  let techNote = '';
+  if (spy.aboveSMA20 === false && spy.aboveSMA50 === false) techNote = ' The index is trading below key moving averages, signaling a bearish technical posture.';
+  else if (spy.aboveSMA20 === true && spy.aboveSMA50 === true) techNote = ' The index remains above key moving averages, maintaining bullish technical structure.';
+
+  let nasdaqNote = '';
+  if (qqq) nasdaqNote = ` The Nasdaq 100 ${qqq.dayChange < 0 ? 'fell' : 'gained'} ${fmtPct(qqq.dayChange)}, ${Math.abs(qqq.weekChange) > 3 ? 'extending a steep weekly decline' : 'in a choppy session'}.`;
+
+  let vixNote = '';
+  if (vix) vixNote = ` The VIX stands at ${fmt(vix)}, indicating ${vix > 30 ? 'extreme' : vix > 25 ? 'elevated' : vix > 18 ? 'moderate' : 'low'} fear in the options market.`;
+
+  let fgNote = '';
+  if (fgScore != null) fgNote = ` Investor sentiment reads ${fgScore} (${fg.rating}) on the CNN Fear & Greed Index.`;
+
+  let weekNote = '';
+  if (spy.weekChange < -2) weekNote = ` Markets have now declined ${fmtPct(spy.weekChange)} over the past week, with selling pressure broad-based.`;
+  else if (spy.weekChange > 2) weekNote = ` Markets are up ${fmtPct(spy.weekChange)} on the week, with momentum favoring bulls.`;
+
+  el.textContent = `Markets ${state}.${nasdaqNote}${techNote}${vixNote}${fgNote}${weekNote}`;
+}
+
+function renderNews(news) {
+  const card = document.getElementById('news-card');
+  if (!news || news.length === 0) {
+    card.innerHTML = '<div class="loading-text">No news available at this time.</div>';
+    return;
+  }
+  card.innerHTML = news.map(n => `
+    <div class="news-item">
+      <div class="news-dot ${n.sentiment}"></div>
+      <div>
+        <div class="news-headline"><a href="${n.link}" target="_blank" rel="noopener">${n.title}</a></div>
+        <div class="news-meta">${n.publisher}${n.pubDate ? ' • ' + n.pubDate : ''}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
 function renderBottomLine(tickerData, fg, vixData) {
   const el = document.getElementById('bottom-line-text');
 
@@ -760,7 +910,8 @@ async function refreshAll() {
   const fetches = allSymbols.map(s => fetchYahoo(s));
   const fgFetch = fetchFearGreed();
 
-  const [results, fg] = await Promise.all([Promise.all(fetches), fgFetch]);
+  const newsFetch = fetchNews();
+  const [results, fg, news] = await Promise.all([Promise.all(fetches), fgFetch, newsFetch]);
 
   // Process results
   const dataMap = {};
@@ -770,13 +921,16 @@ async function refreshAll() {
   });
 
   allData = dataMap;
+  newsData = news;
 
   // Render
   const vixData = dataMap['^VIX'] || null;
   renderSentiment(fg, vixData);
+  renderMarketSummary(dataMap, fg, vixData);
   renderIndices(dataMap);
   renderTickers(dataMap);
   renderSectors(dataMap);
+  renderNews(news);
   renderBottomLine(dataMap, fg, vixData);
 
   // Update timestamp
