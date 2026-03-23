@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Market Briefing — 2026-03-22</title>
+<title>Market Briefing — Live</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
@@ -40,13 +40,9 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
+  background: var(--bg); color: var(--text); line-height: 1.5;
+  -webkit-font-smoothing: antialiased; min-height: 100vh;
 }
-
 .mono { font-family: 'JetBrains Mono', monospace; }
 
 /* ── HEADER ── */
@@ -67,18 +63,15 @@ body {
 }
 .header-title { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
 .header-title span { color: var(--blue); }
-.header-date {
-  font-size: 12px; color: var(--text-dim);
-  font-family: 'JetBrains Mono', monospace;
-}
+.header-date { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
 .header-right { display: flex; gap: 12px; align-items: center; }
 .live-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green);
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255,82,82,0.5); }
-  50% { opacity: 0.6; box-shadow: 0 0 0 8px rgba(255,82,82,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,230,118,0.5); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 8px rgba(0,230,118,0); }
 }
 .status-badge {
   display: flex; align-items: center; gap: 6px;
@@ -88,6 +81,13 @@ body {
 .status-badge.bearish { background: var(--red-bg); color: var(--red); border: 1px solid rgba(255,82,82,0.2); }
 .status-badge.bullish { background: var(--green-bg); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
 .status-badge.neutral { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(255,171,64,0.2); }
+.refresh-btn {
+  background: var(--card2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); padding: 6px 12px; font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; font-family: inherit;
+}
+.refresh-btn:hover { border-color: var(--blue); color: var(--blue); }
+.refresh-btn.loading { opacity: 0.5; pointer-events: none; }
 
 /* ── CONTAINER ── */
 .container { max-width: 1480px; margin: 0 auto; padding: 24px; }
@@ -97,17 +97,12 @@ body {
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
-.grid-7 { grid-template-columns: repeat(7, 1fr); }
 .span-2 { grid-column: span 2; }
 .span-3 { grid-column: span 3; }
 .span-full { grid-column: 1 / -1; }
-
-@media (max-width: 1200px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .grid-7 { grid-template-columns: repeat(4, 1fr); }
-}
+@media (max-width: 1200px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) {
-  .grid-4, .grid-3, .grid-2, .grid-7 { grid-template-columns: 1fr; }
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .span-2, .span-3 { grid-column: span 1; }
   .container { padding: 12px; }
   .header { padding: 16px; flex-wrap: wrap; gap: 12px; }
@@ -115,17 +110,10 @@ body {
 
 /* ── CARDS ── */
 .card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  transition: border-color 0.2s;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; transition: border-color 0.2s;
 }
 .card:hover { border-color: var(--border-light); }
-.card-header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 16px;
-}
 .card-label {
   font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 1.2px; color: var(--text-muted);
@@ -142,37 +130,36 @@ body {
 
 /* ── SENTIMENT HERO ── */
 .sentiment-hero {
-  background: linear-gradient(135deg, rgba(255,82,82,0.06) 0%, var(--card) 50%, rgba(255,82,82,0.03) 100%);
-  border: 1px solid rgba(255,82,82,0.15);
-  border-radius: var(--radius);
-  padding: 28px;
+  border: 1px solid rgba(255,171,64,0.15);
+  border-radius: var(--radius); padding: 28px;
   display: flex; gap: 32px; align-items: center;
+  transition: all 0.5s;
 }
-.sentiment-gauge {
-  position: relative; width: 140px; height: 140px; flex-shrink: 0;
+.sentiment-hero.fear {
+  background: linear-gradient(135deg, rgba(255,82,82,0.06) 0%, var(--card) 50%, rgba(255,82,82,0.03) 100%);
+  border-color: rgba(255,82,82,0.15);
 }
+.sentiment-hero.greed {
+  background: linear-gradient(135deg, rgba(0,230,118,0.06) 0%, var(--card) 50%, rgba(0,230,118,0.03) 100%);
+  border-color: rgba(0,230,118,0.15);
+}
+.sentiment-gauge { position: relative; width: 140px; height: 140px; flex-shrink: 0; }
 .gauge-ring {
   width: 140px; height: 140px; border-radius: 50%;
-  background: conic-gradient(
-    var(--red) 0deg, var(--red) 230deg,
-    var(--border) 230deg, var(--border) 360deg
-  );
   display: flex; align-items: center; justify-content: center;
+  transition: background 0.5s;
 }
 .gauge-inner {
   width: 110px; height: 110px; border-radius: 50%;
-  background: var(--card);
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  border: 2px solid var(--border);
+  background: var(--card); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; border: 2px solid var(--border);
 }
-.gauge-value { font-size: 32px; font-weight: 900; color: var(--red); line-height: 1; }
+.gauge-value { font-size: 32px; font-weight: 900; line-height: 1; transition: color 0.3s; }
 .gauge-label { font-size: 9px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
 .sentiment-info { flex: 1; }
-.sentiment-title { font-size: 28px; font-weight: 900; color: var(--red); margin-bottom: 4px; }
+.sentiment-title { font-size: 28px; font-weight: 900; margin-bottom: 4px; transition: color 0.3s; }
 .sentiment-subtitle { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.6; }
 .sentiment-metrics { display: flex; gap: 24px; }
-.sentiment-metric {}
 .sentiment-metric .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
 .sentiment-metric .value { font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
 
@@ -180,20 +167,14 @@ body {
 .index-card { text-align: center; }
 .index-name { font-size: 11px; font-weight: 600; color: var(--text-dim); margin-bottom: 2px; }
 .index-ticker { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; margin-bottom: 10px; }
-.index-change {
-  font-size: 28px; font-weight: 900;
-  font-family: 'JetBrains Mono', monospace;
-  line-height: 1; margin-bottom: 6px;
-}
+.index-change { font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono', monospace; line-height: 1; margin-bottom: 4px; }
+.index-price { font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; margin-bottom: 6px; }
 .index-note { font-size: 11px; color: var(--text-dim); }
 
 /* ── TICKER CARDS ── */
 .ticker-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  transition: all 0.25s;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; transition: all 0.25s;
 }
 .ticker-card:hover { border-color: var(--blue); transform: translateY(-2px); box-shadow: var(--shadow); }
 .ticker-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
@@ -202,38 +183,20 @@ body {
 .ticker-price { text-align: right; }
 .ticker-price .price { font-size: 18px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
 .ticker-price .change { font-size: 13px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-
 .ticker-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-.ticker-stat {
-  background: var(--bg2); border-radius: var(--radius-sm);
-  padding: 8px 10px; text-align: center;
-}
+.ticker-stat { background: var(--bg2); border-radius: var(--radius-sm); padding: 8px 10px; text-align: center; }
 .ticker-stat .stat-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
-.ticker-stat .stat-val {
-  font-size: 13px; font-weight: 700;
-  font-family: 'JetBrains Mono', monospace; margin-top: 2px;
-}
-
+.ticker-stat .stat-val { font-size: 13px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
 .ticker-levels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
-.level-box {
-  border-radius: var(--radius-sm); padding: 8px 12px;
-}
+.level-box { border-radius: var(--radius-sm); padding: 8px 12px; }
 .level-box.support { background: var(--green-bg); border: 1px solid rgba(0,230,118,0.15); }
 .level-box.resistance { background: var(--red-bg); border: 1px solid rgba(255,82,82,0.15); }
 .level-box .level-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
 .level-box.support .level-label { color: var(--green-dim); }
 .level-box.resistance .level-label { color: var(--red-dim); }
 .level-box .level-val { font-size: 15px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
-
 .ticker-indicators { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-.indicator-pill {
-  font-size: 10px; font-weight: 600; padding: 4px 10px;
-  border-radius: 20px; font-family: 'JetBrains Mono', monospace;
-}
-
-.ticker-text { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-bottom: 8px; }
-.ticker-text strong { color: var(--text); font-weight: 600; }
-.ticker-text:last-child { margin-bottom: 0; }
+.indicator-pill { font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; }
 
 .section-title {
   font-size: 12px; font-weight: 800; text-transform: uppercase;
@@ -242,99 +205,51 @@ body {
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 10px;
 }
-.section-title .icon { font-size: 14px; }
-
-/* ── TABLES ── */
-table { width: 100%; border-collapse: collapse; }
-th {
-  text-align: left; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.8px;
-  color: var(--text-muted); padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-}
-td {
-  padding: 10px 12px; font-size: 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(255,255,255,0.015); }
 
 /* ── HEATMAP ── */
 .heatmap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 @media (max-width: 768px) { .heatmap-grid { grid-template-columns: repeat(2, 1fr); } }
 .heat-cell {
   border-radius: var(--radius-sm); padding: 14px 12px;
-  text-align: center; border: 1px solid transparent;
-  transition: transform 0.15s;
+  text-align: center; border: 1px solid transparent; transition: transform 0.15s;
 }
 .heat-cell:hover { transform: scale(1.03); }
 .heat-cell .sector-name { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
 .heat-cell .sector-perf { font-size: 16px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
-.heat-cell.up {
-  background: rgba(0,230,118,0.06); border-color: rgba(0,230,118,0.12);
-  color: var(--green);
-}
-.heat-cell.down {
-  background: rgba(255,82,82,0.06); border-color: rgba(255,82,82,0.12);
-  color: var(--red);
-}
-.heat-cell.flat {
-  background: rgba(255,171,64,0.06); border-color: rgba(255,171,64,0.12);
-  color: var(--amber);
-}
-
-/* ── NEWS ── */
-.news-item {
-  padding: 14px 0; border-bottom: 1px solid var(--border);
-  display: flex; gap: 12px; align-items: flex-start;
-}
-.news-item:last-child { border-bottom: none; }
-.news-dot {
-  width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
-}
-.news-dot.bearish { background: var(--red); }
-.news-dot.bullish { background: var(--green); }
-.news-dot.neutral { background: var(--amber); }
-.news-headline { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
-.news-summary { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.heat-cell.up { background: rgba(0,230,118,0.06); border-color: rgba(0,230,118,0.12); color: var(--green); }
+.heat-cell.down { background: rgba(255,82,82,0.06); border-color: rgba(255,82,82,0.12); color: var(--red); }
+.heat-cell.flat { background: rgba(255,171,64,0.06); border-color: rgba(255,171,64,0.12); color: var(--amber); }
 
 /* ── BOTTOM LINE ── */
 .bottom-line {
   background: linear-gradient(135deg, rgba(68,138,255,0.08) 0%, var(--card) 50%, rgba(179,136,255,0.05) 100%);
-  border: 1px solid rgba(68,138,255,0.2);
-  border-radius: var(--radius);
-  padding: 28px;
+  border: 1px solid rgba(68,138,255,0.2); border-radius: var(--radius); padding: 28px;
 }
 .bottom-line-title {
   font-size: 14px; font-weight: 800; text-transform: uppercase;
-  letter-spacing: 1.5px; color: var(--blue);
-  margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  letter-spacing: 1.5px; color: var(--blue); margin-bottom: 12px;
 }
 .bottom-line-text { font-size: 14px; color: var(--text); line-height: 1.8; }
 
-/* ── MARKET SUMMARY ── */
-.market-summary {
-  background: var(--card2); border-radius: var(--radius-sm);
-  padding: 16px 20px; font-size: 13px; color: var(--text-dim);
-  line-height: 1.7; border-left: 3px solid var(--blue);
+/* ── LOADING ── */
+.skeleton {
+  background: linear-gradient(90deg, var(--card2) 25%, var(--border) 50%, var(--card2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px; color: transparent !important;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.loading-text { color: var(--text-muted); font-size: 13px; text-align: center; padding: 40px; }
+
+/* ── LAST UPDATED ── */
+.last-updated {
+  text-align: center; padding: 32px 0 16px; color: var(--text-muted); font-size: 11px;
 }
 
-/* ── SCROLLBAR ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
-
-/* ── EARNINGS TABLE ── */
-.timing-badge {
-  font-size: 9px; font-weight: 700; padding: 2px 6px;
-  border-radius: 3px; font-family: 'JetBrains Mono', monospace;
+@media (max-width: 768px) {
+  .sentiment-hero { flex-direction: column; text-align: center; }
+  .sentiment-metrics { justify-content: center; }
 }
-.timing-bmo { background: var(--amber-bg); color: var(--amber); }
-.timing-amc { background: var(--purple-bg); color: var(--purple); }
-.importance-high { color: var(--red); font-weight: 700; }
-.importance-medium { color: var(--amber); font-weight: 600; }
-.importance-low { color: var(--text-muted); font-weight: 500; }
 </style>
 </head>
 <body>
@@ -345,489 +260,555 @@ tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="logo">M</div>
     <div>
       <div class="header-title">Market <span>Briefing</span></div>
-      <div class="header-date">SUN 2026-03-22 &bull; Weekend Edition &bull; Data as of Fri Mar 20 Close</div>
+      <div class="header-date" id="header-date">Loading...</div>
     </div>
   </div>
   <div class="header-right">
+    <button class="refresh-btn" id="refresh-btn" onclick="refreshAll()">Refresh</button>
     <div class="live-dot"></div>
-    <div class="status-badge bearish">BEARISH</div>
+    <div class="status-badge neutral" id="sentiment-badge">LOADING</div>
   </div>
 </div>
 
 <div class="container">
 
   <!-- ═══ SENTIMENT HERO ═══ -->
-  <div class="sentiment-hero" style="margin-bottom: 16px;">
+  <div class="sentiment-hero" id="sentiment-hero" style="margin-bottom: 16px;">
     <div class="sentiment-gauge">
-      <div class="gauge-ring">
+      <div class="gauge-ring" id="gauge-ring" style="background: conic-gradient(var(--border) 0deg, var(--border) 360deg);">
         <div class="gauge-inner">
-          <div class="gauge-value">15</div>
+          <div class="gauge-value" id="fg-value" style="color: var(--text-muted);">--</div>
           <div class="gauge-label">Fear &amp; Greed</div>
         </div>
       </div>
     </div>
     <div class="sentiment-info">
-      <div class="sentiment-title">EXTREME FEAR</div>
-      <div class="sentiment-subtitle">
-        Extreme fear dominates with the CNN Fear &amp; Greed Index at 15, as the Iran-US conflict enters its fourth week with the Strait of Hormuz blockade driving oil prices sharply higher. The S&amp;P 500 has broken below its 200-day moving average for the first time in over a year, posting four consecutive weekly losses, while more than half of US investors now report pessimistic outlooks.
-      </div>
+      <div class="sentiment-title" id="fg-title" style="color: var(--text-muted);">Loading...</div>
+      <div class="sentiment-subtitle" id="fg-subtitle">Fetching market sentiment data...</div>
       <div class="sentiment-metrics">
         <div class="sentiment-metric">
           <div class="label">VIX</div>
-          <div class="value mono" style="color: var(--red);">26.78</div>
+          <div class="value mono" id="vix-value" style="color: var(--text-muted);">--</div>
         </div>
         <div class="sentiment-metric">
-          <div class="label">Sentiment Score</div>
-          <div class="value mono" style="color: var(--red);">-72</div>
+          <div class="label">VIX Change</div>
+          <div class="value mono" id="vix-change" style="color: var(--text-muted);">--</div>
         </div>
         <div class="sentiment-metric">
           <div class="label">Signal</div>
-          <div class="value" style="color: var(--red); font-size: 16px; font-weight: 800;">BEARISH</div>
+          <div class="value" id="signal-text" style="color: var(--text-muted); font-size: 16px; font-weight: 800;">--</div>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- ═══ MARKET SUMMARY ═══ -->
-  <div class="market-summary" style="margin-bottom: 16px;">
-    Markets closed Friday March 20 sharply lower as the S&amp;P 500 broke below its 200-day moving average for the first time since early 2025, completing a fourth consecutive weekly decline. The Iran war and Strait of Hormuz blockade continue to drive oil prices higher, fueling inflation fears and pressuring risk assets across the board. President Trump's threat to attack Iranian power plants added to geopolitical uncertainty, while defensive sectors like utilities and energy continue to outperform as investors rotate out of growth and technology. Near-term outlook remains fragile with elevated volatility and no clear catalyst for stabilization until geopolitical tensions de-escalate.
   </div>
 
   <!-- ═══ MAJOR INDICES ═══ -->
-  <div class="section-title"><span class="icon">📊</span> Major Indices</div>
-  <div class="grid grid-3" style="margin-bottom: 24px;">
-    <!-- SPY -->
-    <div class="card index-card">
-      <div class="index-name">S&amp;P 500</div>
-      <div class="index-ticker">SPY</div>
-      <div class="index-change" style="color: var(--red);">-1.70%</div>
-      <div class="index-note">Broke below 200-day moving average</div>
-    </div>
-    <!-- QQQ -->
-    <div class="card index-card">
-      <div class="index-name">Nasdaq 100</div>
-      <div class="index-ticker">QQQ</div>
-      <div class="index-change" style="color: var(--red);">-1.85%</div>
-      <div class="index-note">Plunged to six-month lows on tech selling</div>
-    </div>
-    <!-- DIA -->
-    <div class="card index-card">
-      <div class="index-name">Dow Jones</div>
-      <div class="index-ticker">DIA</div>
-      <div class="index-change" style="color: var(--red);">-1.12%</div>
-      <div class="index-note">New 2026 closing low at 45,577</div>
-    </div>
+  <div class="section-title">MAJOR INDICES</div>
+  <div class="grid grid-3" id="indices-grid" style="margin-bottom: 24px;">
+    <div class="card index-card"><div class="loading-text">Loading S&amp;P 500...</div></div>
+    <div class="card index-card"><div class="loading-text">Loading Nasdaq 100...</div></div>
+    <div class="card index-card"><div class="loading-text">Loading Dow Jones...</div></div>
   </div>
 
   <!-- ═══ TICKER ANALYSIS ═══ -->
-  <div class="section-title"><span class="icon">🎯</span> Ticker Analysis</div>
-  <div class="grid grid-3" style="margin-bottom: 24px;">
-
-    <!-- SPY -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">SPY</div><div class="ticker-name">SPDR S&amp;P 500 ETF</div></div>
-        <div class="ticker-price">
-          <div class="price">$648.57</div>
-          <div class="change" style="color: var(--red);">-1.70%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-3.10%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-6.80%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--amber);">37</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$644.72</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$660.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-red">BEARISH</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-        <span class="indicator-pill badge-red">Below 200MA</span>
-        <span class="indicator-pill badge-amber">Vol ↑</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Critical support at $644-645 from Friday's intraday lows; a break below opens $620-625. Resistance clustered at $660 (prior support now resistance) and $695 (major overhead supply zone).</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> Oversold RSI at 37 suggests a relief bounce is possible toward $660 resistance. Aggressive longs near $645 with stop at $638, targeting $658-662. Safer play: wait for reclaim of 200-day MA near $650.</div>
-    </div>
-
-    <!-- QQQ -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">QQQ</div><div class="ticker-name">Invesco QQQ Trust</div></div>
-        <div class="ticker-price">
-          <div class="price">$582.06</div>
-          <div class="change" style="color: var(--red);">-1.85%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-3.50%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-8.60%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--red);">30</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$575.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$600.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-red">BEARISH</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-        <span class="indicator-pill badge-red">Below 200MA</span>
-        <span class="indicator-pill badge-amber">Vol ↑</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Key psychological support at $575; a break below targets $550. Resistance at $600 (round number) then $608 at 200-day MA. Six-month lows.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> RSI at 30 right at oversold threshold. Bounce toward $600 is the base case. Entry on hold of $575 with stop at $568, targeting $598-605. Fade rallies into $600-608 if macro doesn't improve.</div>
-    </div>
-
-    <!-- NVDA -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">NVDA</div><div class="ticker-name">NVIDIA Corporation</div></div>
-        <div class="ticker-price">
-          <div class="price">$172.70</div>
-          <div class="change" style="color: var(--red);">-3.28%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-8.50%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-15.20%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--red);">19</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$165.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$180.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-red">BEARISH</span>
-        <span class="indicator-pill badge-red">RSI 19 ⚠</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-        <span class="indicator-pill badge-red">Below 200MA</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Deeply oversold RSI 19, approaching critical support near $165 (Aug 2025 breakout). Resistance at $180 and $184. Break below $165 targets $150.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> Extremely oversold — snapback rally likely. Watch for reversal candle near $165-170, long with stop below $162, targeting $180-184. High-conviction mean-reversion if geopolitics stabilize.</div>
-    </div>
-
-    <!-- AMD -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">AMD</div><div class="ticker-name">Advanced Micro Devices</div></div>
-        <div class="ticker-price">
-          <div class="price">$205.27</div>
-          <div class="change" style="color: var(--green);">+2.91%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-2.10%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-9.40%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--amber);">46</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$195.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$213.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-amber">NEUTRAL</span>
-        <span class="indicator-pill badge-green">Relative Strength</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Support at $195 swing low; below that $185. Resistance $213-215 (20-day SMA). Meta $60B GPU deal provides a fundamental floor.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> Showing relative strength vs peers (+2.91% Friday). Accumulate dips to $195-200, stop at $190. Upside $220-225 if $213 breaks. Meta deal gives a stronger floor.</div>
-    </div>
-
-    <!-- AAPL -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">AAPL</div><div class="ticker-name">Apple Inc.</div></div>
-        <div class="ticker-price">
-          <div class="price">$247.99</div>
-          <div class="change" style="color: var(--red);">-0.39%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-2.80%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-8.50%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--amber);">33</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$246.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$260.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-red">BEARISH</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-        <span class="indicator-pill badge-amber">At 200MA</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Sitting right at 200-day MA ($248) — make-or-break level. Support at $246 then $235. Resistance at $260 (50-day MA) and $272.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> Long entry at 200-day MA with tight stop at $243, targeting $260 on a bounce. If $246 breaks decisively, step aside and re-enter at $235.</div>
-    </div>
-
-    <!-- PLTR -->
-    <div class="ticker-card">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">PLTR</div><div class="ticker-name">Palantir Technologies</div></div>
-        <div class="ticker-price">
-          <div class="price">$150.68</div>
-          <div class="change" style="color: var(--red);">-3.21%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-4.50%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-12.00%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--amber);">55</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$142.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$163.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-amber">NEUTRAL</span>
-        <span class="indicator-pill badge-red">Below 50MA</span>
-        <span class="indicator-pill badge-green">Above 200MA</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Support at $142-144 (20-day SMA/pivot). Below that $122 (Feb lows). Resistance at $153-154 (50-day SMA) and $163. Holding above 200-day MA is constructive.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> 50-day SMA at $153 is the battleground. Close above $154 targets $163-165. If rejected, expect retest of $142. Wait for directional confirmation.</div>
-    </div>
-
-    <!-- TSLA -->
-    <div class="ticker-card" style="grid-column: 1 / -1; max-width: calc(33.33% - 11px);">
-      <div class="ticker-top">
-        <div><div class="ticker-symbol">TSLA</div><div class="ticker-name">Tesla Inc.</div></div>
-        <div class="ticker-price">
-          <div class="price">$367.96</div>
-          <div class="change" style="color: var(--red);">-3.25%</div>
-        </div>
-      </div>
-      <div class="ticker-stats">
-        <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: var(--red);">-5.80%</div></div>
-        <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: var(--red);">-14.00%</div></div>
-        <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: var(--red);">29</div></div>
-      </div>
-      <div class="ticker-levels">
-        <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">$364.00</div></div>
-        <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">$394.00</div></div>
-      </div>
-      <div class="ticker-indicators">
-        <span class="indicator-pill badge-red">BEARISH</span>
-        <span class="indicator-pill badge-red">RSI 29 ⚠</span>
-        <span class="indicator-pill badge-red">Below 200MA</span>
-        <span class="indicator-pill badge-amber">Vol ↑</span>
-      </div>
-      <div class="ticker-text"><strong>Key Levels:</strong> Critical support at $364 (Friday's low); break below opens $340-345 rapidly. Resistance at $380 and $394 (200-day SMA). All MAs overhead.</div>
-      <div class="ticker-text"><strong>Trade Setup:</strong> Deeply oversold but don't catch a falling knife. Wait for reversal candle or reclaim of $380. If $364 breaks, short targeting $340. High-risk, high-reward.</div>
-    </div>
+  <div class="section-title">TICKER ANALYSIS</div>
+  <div class="grid grid-3" id="tickers-grid" style="margin-bottom: 24px;">
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
+    <div class="card"><div class="loading-text">Loading...</div></div>
   </div>
 
   <!-- ═══ SECTOR HEATMAP ═══ -->
-  <div class="section-title"><span class="icon">🔥</span> Sector Heatmap — Weekly</div>
+  <div class="section-title">SECTOR HEATMAP</div>
   <div class="card span-full" style="margin-bottom: 24px;">
-    <div class="heatmap-grid">
-      <div class="heat-cell up"><div class="sector-name">Energy</div><div class="sector-perf">+3.2%</div></div>
-      <div class="heat-cell up"><div class="sector-name">Utilities</div><div class="sector-perf">+1.8%</div></div>
-      <div class="heat-cell up"><div class="sector-name">Materials</div><div class="sector-perf">+1.1%</div></div>
-      <div class="heat-cell up"><div class="sector-name">Consumer Staples</div><div class="sector-perf">+0.7%</div></div>
-      <div class="heat-cell up"><div class="sector-name">Real Estate</div><div class="sector-perf">+0.6%</div></div>
-      <div class="heat-cell up"><div class="sector-name">Healthcare</div><div class="sector-perf">+0.4%</div></div>
-      <div class="heat-cell down"><div class="sector-name">Industrials</div><div class="sector-perf">-0.9%</div></div>
-      <div class="heat-cell down"><div class="sector-name">Financials</div><div class="sector-perf">-1.5%</div></div>
-      <div class="heat-cell down"><div class="sector-name">Comm. Services</div><div class="sector-perf">-2.1%</div></div>
-      <div class="heat-cell down"><div class="sector-name">Consumer Disc.</div><div class="sector-perf">-2.4%</div></div>
-      <div class="heat-cell down"><div class="sector-name">Technology</div><div class="sector-perf">-2.8%</div></div>
-    </div>
-  </div>
-
-  <!-- ═══ TWO-COLUMN: ECON CALENDAR + EARNINGS ═══ -->
-  <div class="grid grid-2" style="margin-bottom: 24px;">
-
-    <!-- Economic Calendar -->
-    <div class="card">
-      <div class="section-title" style="margin-bottom: 12px;"><span class="icon">📅</span> Economic Calendar — Week of Mar 23</div>
-      <table>
-        <thead>
-          <tr><th>Date</th><th>Time</th><th>Event</th><th>Impact</th><th>Forecast</th><th>Previous</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Tue Mar 24</td>
-            <td class="mono" style="font-size: 11px;">08:30 ET</td>
-            <td>Nonfarm Productivity (Q4)</td>
-            <td><span class="card-badge badge-amber">MED</span></td>
-            <td class="mono">1.2%</td>
-            <td class="mono">2.2%</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Tue Mar 24</td>
-            <td class="mono" style="font-size: 11px;">10:00 ET</td>
-            <td>New Home Sales (Feb)</td>
-            <td><span class="card-badge badge-red">HIGH</span></td>
-            <td class="mono">680K</td>
-            <td class="mono">657K</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Tue Mar 24</td>
-            <td class="mono" style="font-size: 11px;">10:00 ET</td>
-            <td>Richmond Fed Mfg Index (Mar)</td>
-            <td><span class="card-badge badge-amber">MED</span></td>
-            <td class="mono">-4</td>
-            <td class="mono">-4</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td class="mono" style="font-size: 11px;">08:30 ET</td>
-            <td>Durable Goods Orders (Feb)</td>
-            <td><span class="card-badge badge-red">HIGH</span></td>
-            <td class="mono">-1.0%</td>
-            <td class="mono">3.2%</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td class="mono" style="font-size: 11px;">08:30 ET</td>
-            <td>Current Account (Q4)</td>
-            <td><span class="card-badge badge-amber">MED</span></td>
-            <td class="mono">-$310B</td>
-            <td class="mono">-$310.9B</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Fri Mar 27</td>
-            <td class="mono" style="font-size: 11px;">08:30 ET</td>
-            <td>GDP (Q4 Third Estimate)</td>
-            <td><span class="card-badge badge-red">HIGH</span></td>
-            <td class="mono">2.3%</td>
-            <td class="mono">2.3%</td>
-          </tr>
-          <tr>
-            <td class="mono" style="font-size: 11px;">Fri Mar 27</td>
-            <td class="mono" style="font-size: 11px;">10:00 ET</td>
-            <td>UMich Consumer Sentiment (Mar)</td>
-            <td><span class="card-badge badge-red">HIGH</span></td>
-            <td class="mono">57.9</td>
-            <td class="mono">64.7</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Earnings Calendar -->
-    <div class="card">
-      <div class="section-title" style="margin-bottom: 12px;"><span class="icon">💰</span> Earnings Calendar — Week of Mar 23</div>
-      <table>
-        <thead>
-          <tr><th>Company</th><th>Date</th><th>Time</th><th>Est. EPS</th><th>Why It Matters</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>GameStop</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">GME</span></td>
-            <td class="mono" style="font-size: 11px;">Tue Mar 24</td>
-            <td><span class="timing-badge timing-amc">AMC</span></td>
-            <td class="mono">$0.09</td>
-            <td style="font-size: 11px; color: var(--text-dim);">BTC treasury strategy &amp; cash deployment under scrutiny</td>
-          </tr>
-          <tr>
-            <td><strong>KB Home</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">KBH</span></td>
-            <td class="mono" style="font-size: 11px;">Tue Mar 24</td>
-            <td><span class="timing-badge timing-amc">AMC</span></td>
-            <td class="mono">$1.72</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Housing demand read amid rising mortgage rates</td>
-          </tr>
-          <tr>
-            <td><strong>Dollar Tree</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">DLTR</span></td>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td><span class="timing-badge timing-bmo">BMO</span></td>
-            <td class="mono">$2.20</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Consumer staples barometer; tariff &amp; Family Dollar guidance</td>
-          </tr>
-          <tr>
-            <td><strong>Cintas</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">CTAS</span></td>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td><span class="timing-badge timing-bmo">BMO</span></td>
-            <td class="mono">$4.28</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Business services bellwether for SMB health</td>
-          </tr>
-          <tr>
-            <td><strong>Chewy</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">CHWY</span></td>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td><span class="timing-badge timing-amc">AMC</span></td>
-            <td class="mono">$0.28</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Pet spending resilience; $3.26B rev expected</td>
-          </tr>
-          <tr>
-            <td><strong>Paychex</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">PAYX</span></td>
-            <td class="mono" style="font-size: 11px;">Wed Mar 25</td>
-            <td><span class="timing-badge timing-bmo">BMO</span></td>
-            <td class="mono">$1.49</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Real-time view of SMB hiring &amp; wage trends</td>
-          </tr>
-          <tr>
-            <td><strong>McCormick</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">MKC</span></td>
-            <td class="mono" style="font-size: 11px;">Thu Mar 26</td>
-            <td><span class="timing-badge timing-bmo">BMO</span></td>
-            <td class="mono">$0.64</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Pricing power &amp; volume in inflationary environment</td>
-          </tr>
-          <tr>
-            <td><strong>Lululemon</strong> <span class="mono" style="color: var(--text-muted); font-size: 10px;">LULU</span></td>
-            <td class="mono" style="font-size: 11px;">Thu Mar 26</td>
-            <td><span class="timing-badge timing-amc">AMC</span></td>
-            <td class="mono">$6.00</td>
-            <td style="font-size: 11px; color: var(--text-dim);">Options pricing 10% swing; intl growth key focus</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ═══ KEY NEWS ═══ -->
-  <div class="section-title"><span class="icon">📰</span> Key News</div>
-  <div class="card" style="margin-bottom: 24px;">
-    <div class="news-item">
-      <div class="news-dot bearish"></div>
-      <div>
-        <div class="news-headline">Trump Threatens Iran Power Plant Strikes</div>
-        <div class="news-summary">President Trump warned of attacks on Iranian power infrastructure if the Strait of Hormuz blockade isn't lifted, escalating geopolitical risk and sending oil prices higher while pressuring equities.</div>
-      </div>
-    </div>
-    <div class="news-item">
-      <div class="news-dot bearish"></div>
-      <div>
-        <div class="news-headline">S&amp;P 500 Breaks Below 200-Day Moving Average</div>
-        <div class="news-summary">The benchmark index closed below its 200-day MA for the first time in over a year, a bearish technical signal that historically precedes further downside or extended consolidation.</div>
-      </div>
-    </div>
-    <div class="news-item">
-      <div class="news-dot neutral"></div>
-      <div>
-        <div class="news-headline">Super Micro Craters 27%, Dell Rises 5%</div>
-        <div class="news-summary">A dramatic shift in the AI server market as Dell emerges as the new front-runner, signaling potential reshuffling of AI infrastructure supply chain winners and losers.</div>
-      </div>
-    </div>
-    <div class="news-item">
-      <div class="news-dot bearish"></div>
-      <div>
-        <div class="news-headline">Oil Prices Surge on Hormuz Strait Blockade</div>
-        <div class="news-summary">Crude oil continues to climb as Iran's blockade of the Strait of Hormuz disrupts global energy supply chains, fueling inflation concerns and pressuring consumer discretionary and transport sectors.</div>
-      </div>
-    </div>
-    <div class="news-item">
-      <div class="news-dot bearish"></div>
-      <div>
-        <div class="news-headline">Over Half of US Investors Now Pessimistic</div>
-        <div class="news-summary">Investor pessimism surged to over 50% from 35% just two weeks ago, reflecting rapidly deteriorating confidence that could lead to further de-risking and capitulation selling.</div>
-      </div>
+    <div class="heatmap-grid" id="sector-grid">
+      <div class="loading-text" style="grid-column: 1/-1;">Loading sector data...</div>
     </div>
   </div>
 
   <!-- ═══ BOTTOM LINE ═══ -->
-  <div class="bottom-line">
-    <div class="bottom-line-title">⚡ The Bottom Line</div>
-    <div class="bottom-line-text">
-      Markets are in a confirmed downtrend with the S&amp;P 500 below its 200-day moving average and extreme fear gripping investors (Fear &amp; Greed at 15). The biggest risk this week is further Iran escalation driving oil higher and GDP/durable goods data confirming a stagflationary setup. However, deeply oversold conditions across major names (NVDA RSI 19, TSLA RSI 29, QQQ RSI 30) suggest a violent relief rally is brewing — traders should watch the $644 SPY and $575 QQQ levels as lines in the sand, and be ready to act on either a breakdown or a snapback bounce.
-    </div>
+  <div class="bottom-line" style="margin-bottom: 16px;">
+    <div class="bottom-line-title">The Bottom Line</div>
+    <div class="bottom-line-text" id="bottom-line-text">Analyzing market conditions...</div>
   </div>
 
-  <div style="text-align: center; padding: 32px 0 16px; color: var(--text-muted); font-size: 11px;">
-    Data sourced from market close Fri Mar 20, 2026 &bull; Not financial advice &bull; Do your own research
-  </div>
-
+  <div class="last-updated" id="last-updated">Loading data...</div>
 </div>
 
+<script>
+// ═══════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+const TICKERS = [
+  { symbol: 'SPY', name: 'SPDR S&P 500 ETF', isIndex: true, indexName: 'S&P 500' },
+  { symbol: 'QQQ', name: 'Invesco QQQ Trust', isIndex: true, indexName: 'Nasdaq 100' },
+  { symbol: 'DIA', name: 'SPDR Dow Jones ETF', isIndex: true, indexName: 'Dow Jones' },
+  { symbol: 'NVDA', name: 'NVIDIA Corporation' },
+  { symbol: 'AMD', name: 'Advanced Micro Devices' },
+  { symbol: 'AAPL', name: 'Apple Inc.' },
+  { symbol: 'PLTR', name: 'Palantir Technologies' },
+  { symbol: 'TSLA', name: 'Tesla Inc.' },
+];
+
+const SECTOR_ETFS = [
+  { symbol: 'XLK', name: 'Technology' },
+  { symbol: 'XLV', name: 'Healthcare' },
+  { symbol: 'XLF', name: 'Financials' },
+  { symbol: 'XLE', name: 'Energy' },
+  { symbol: 'XLY', name: 'Consumer Disc.' },
+  { symbol: 'XLI', name: 'Industrials' },
+  { symbol: 'XLU', name: 'Utilities' },
+  { symbol: 'XLRE', name: 'Real Estate' },
+  { symbol: 'XLB', name: 'Materials' },
+  { symbol: 'XLC', name: 'Comm. Services' },
+  { symbol: 'XLP', name: 'Consumer Staples' },
+];
+
+let allData = {};
+
+// ═══════════════════════════════════════
+// YAHOO FINANCE FETCH
+// ═══════════════════════════════════════
+async function fetchYahoo(symbol, range = '1mo', interval = '1d') {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}`;
+  try {
+    const resp = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    return json.chart.result[0];
+  } catch (e) {
+    console.warn(`Failed to fetch ${symbol}:`, e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// FEAR & GREED INDEX
+// ═══════════════════════════════════════
+async function fetchFearGreed() {
+  try {
+    const url = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata';
+    const resp = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    return json.fear_and_greed;
+  } catch (e) {
+    console.warn('Failed to fetch Fear & Greed:', e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════
+function calcRSI(closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gains += diff; else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+function calcSMA(closes, period) {
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function pctChange(current, previous) {
+  if (!previous) return 0;
+  return ((current - previous) / previous) * 100;
+}
+
+function findSupport(lows, currentPrice) {
+  const recentLows = lows.slice(-20).filter(l => l < currentPrice).sort((a, b) => b - a);
+  return recentLows[0] || currentPrice * 0.97;
+}
+
+function findResistance(highs, currentPrice) {
+  const recentHighs = highs.slice(-20).filter(h => h > currentPrice).sort((a, b) => a - b);
+  return recentHighs[0] || currentPrice * 1.03;
+}
+
+function fmt(num, decimals = 2) {
+  if (num == null || isNaN(num)) return '--';
+  return num.toFixed(decimals);
+}
+
+function fmtPrice(num) {
+  if (num == null || isNaN(num)) return '--';
+  return '$' + num.toFixed(2);
+}
+
+function fmtPct(num) {
+  if (num == null || isNaN(num)) return '--';
+  const sign = num >= 0 ? '+' : '';
+  return sign + num.toFixed(2) + '%';
+}
+
+function colorForChange(val) {
+  if (val > 0.05) return 'var(--green)';
+  if (val < -0.05) return 'var(--red)';
+  return 'var(--amber)';
+}
+
+// ═══════════════════════════════════════
+// PROCESS TICKER DATA
+// ═══════════════════════════════════════
+function processTickerData(result) {
+  if (!result) return null;
+  const meta = result.meta;
+  const quotes = result.indicators.quote[0];
+  const closes = quotes.close.filter(c => c != null);
+  const highs = quotes.high.filter(h => h != null);
+  const lows = quotes.low.filter(l => l != null);
+  const volumes = quotes.volume.filter(v => v != null);
+
+  const currentPrice = meta.regularMarketPrice;
+  const prevClose = meta.chartPreviousClose || closes[closes.length - 2];
+  const dayChange = pctChange(currentPrice, prevClose);
+
+  // Week change (5 trading days ago)
+  const weekAgoPrice = closes.length >= 6 ? closes[closes.length - 6] : closes[0];
+  const weekChange = pctChange(currentPrice, weekAgoPrice);
+
+  // Month change (first price in range)
+  const monthAgoPrice = closes[0];
+  const monthChange = pctChange(currentPrice, monthAgoPrice);
+
+  // RSI
+  const rsi = calcRSI(closes);
+
+  // Moving averages (approximate from available data)
+  const sma20 = calcSMA(closes, Math.min(20, closes.length));
+  const sma50 = closes.length >= 20 ? calcSMA(closes, 20) : null; // Best approximation from 1mo data
+
+  // Support/Resistance
+  const support = findSupport(lows, currentPrice);
+  const resistance = findResistance(highs, currentPrice);
+
+  // Volume
+  const avgVol = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
+  const lastVol = volumes[volumes.length - 1] || avgVol;
+  const volRatio = lastVol / avgVol;
+
+  return {
+    currentPrice,
+    prevClose,
+    dayChange,
+    weekChange,
+    monthChange,
+    rsi,
+    sma20,
+    sma50,
+    support,
+    resistance,
+    aboveSMA20: sma20 ? currentPrice > sma20 : null,
+    aboveSMA50: sma50 ? currentPrice > sma50 : null,
+    volume: volRatio > 1.15 ? 'above average' : volRatio < 0.85 ? 'below average' : 'average',
+    volRatio,
+  };
+}
+
+// ═══════════════════════════════════════
+// RENDER FUNCTIONS
+// ═══════════════════════════════════════
+
+function renderHeader() {
+  const now = new Date();
+  const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const day = days[now.getDay()];
+  const dateStr = now.toISOString().split('T')[0];
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+  const marketNote = isWeekend ? 'Weekend Edition' : 'Live Market Data';
+  document.getElementById('header-date').textContent = `${day} ${dateStr} • ${marketNote} • Auto-refreshing`;
+}
+
+function renderSentiment(fg, vixData) {
+  const hero = document.getElementById('sentiment-hero');
+  const badge = document.getElementById('sentiment-badge');
+
+  // VIX
+  if (vixData) {
+    document.getElementById('vix-value').textContent = fmt(vixData.currentPrice);
+    document.getElementById('vix-value').style.color = vixData.currentPrice > 20 ? 'var(--red)' : vixData.currentPrice > 15 ? 'var(--amber)' : 'var(--green)';
+    document.getElementById('vix-change').textContent = fmtPct(vixData.dayChange);
+    document.getElementById('vix-change').style.color = colorForChange(-vixData.dayChange); // inverse for VIX
+  }
+
+  // Fear & Greed
+  if (fg) {
+    const score = Math.round(fg.score);
+    const rating = fg.rating;
+    const gaugeAngle = (score / 100) * 360;
+    const gaugeColor = score <= 25 ? 'var(--red)' : score <= 45 ? 'var(--amber)' : score <= 55 ? 'var(--amber)' : score <= 75 ? 'var(--green-dim)' : 'var(--green)';
+    const textColor = score <= 25 ? 'var(--red)' : score <= 45 ? 'var(--amber)' : score <= 55 ? 'var(--amber)' : 'var(--green)';
+
+    document.getElementById('gauge-ring').style.background = `conic-gradient(${gaugeColor} 0deg, ${gaugeColor} ${gaugeAngle}deg, var(--border) ${gaugeAngle}deg, var(--border) 360deg)`;
+    document.getElementById('fg-value').textContent = score;
+    document.getElementById('fg-value').style.color = textColor;
+    document.getElementById('fg-title').textContent = rating.toUpperCase();
+    document.getElementById('fg-title').style.color = textColor;
+
+    hero.className = 'sentiment-hero ' + (score <= 40 ? 'fear' : score >= 60 ? 'greed' : '');
+
+    // Determine overall sentiment
+    let sentiment = 'NEUTRAL';
+    let sentimentClass = 'neutral';
+    if (score <= 30 || (vixData && vixData.currentPrice > 25)) {
+      sentiment = 'BEARISH';
+      sentimentClass = 'bearish';
+    } else if (score >= 60 && (!vixData || vixData.currentPrice < 18)) {
+      sentiment = 'BULLISH';
+      sentimentClass = 'bullish';
+    }
+    badge.textContent = sentiment;
+    badge.className = 'status-badge ' + sentimentClass;
+
+    document.getElementById('signal-text').textContent = sentiment;
+    document.getElementById('signal-text').style.color = textColor;
+
+    // Build description
+    const vixNote = vixData ? ` VIX at ${fmt(vixData.currentPrice)} signals ${vixData.currentPrice > 25 ? 'elevated' : vixData.currentPrice > 18 ? 'moderate' : 'low'} volatility.` : '';
+    document.getElementById('fg-subtitle').textContent =
+      `The CNN Fear & Greed Index reads ${score} (${rating}), reflecting ${score <= 25 ? 'extreme fear and panic selling pressure' : score <= 40 ? 'fearful sentiment with investors cautious' : score <= 55 ? 'neutral sentiment with balanced positioning' : score <= 75 ? 'greedy sentiment with risk-on positioning' : 'extreme greed with euphoric buying'}.${vixNote}`;
+  } else {
+    document.getElementById('fg-title').textContent = 'UNAVAILABLE';
+    document.getElementById('fg-subtitle').textContent = 'Fear & Greed data could not be loaded. Check back later.';
+  }
+}
+
+function renderIndices(indicesData) {
+  const grid = document.getElementById('indices-grid');
+  const indices = TICKERS.filter(t => t.isIndex);
+  grid.innerHTML = indices.map(idx => {
+    const data = indicesData[idx.symbol];
+    if (!data) return `<div class="card index-card"><div class="loading-text">Failed to load ${idx.indexName}</div></div>`;
+    const color = colorForChange(data.dayChange);
+    return `
+      <div class="card index-card">
+        <div class="index-name">${idx.indexName}</div>
+        <div class="index-ticker">${idx.symbol}</div>
+        <div class="index-change" style="color: ${color};">${fmtPct(data.dayChange)}</div>
+        <div class="index-price">${fmtPrice(data.currentPrice)}</div>
+        <div class="index-note">${data.dayChange < -1 ? 'Selling pressure' : data.dayChange > 1 ? 'Strong buying' : 'Range-bound session'}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderTickers(tickerData) {
+  const grid = document.getElementById('tickers-grid');
+  const tickers = TICKERS.filter(t => !t.isIndex || t.symbol === 'SPY' || t.symbol === 'QQQ');
+  // Include SPY, QQQ, and non-index tickers
+  const renderList = [
+    TICKERS.find(t => t.symbol === 'SPY'),
+    TICKERS.find(t => t.symbol === 'QQQ'),
+    ...TICKERS.filter(t => !t.isIndex),
+  ];
+
+  grid.innerHTML = renderList.map(t => {
+    const d = tickerData[t.symbol];
+    if (!d) return `<div class="ticker-card"><div class="loading-text">Failed to load ${t.symbol}</div></div>`;
+
+    const dayColor = colorForChange(d.dayChange);
+    const weekColor = colorForChange(d.weekChange);
+    const monthColor = colorForChange(d.monthChange);
+    const rsiColor = d.rsi < 30 ? 'var(--red)' : d.rsi > 70 ? 'var(--green)' : 'var(--amber)';
+
+    let outlook = 'NEUTRAL';
+    let outlookClass = 'badge-amber';
+    if (d.rsi && d.rsi < 40 && d.dayChange < 0 && d.weekChange < 0) { outlook = 'BEARISH'; outlookClass = 'badge-red'; }
+    else if (d.rsi && d.rsi > 55 && d.dayChange > 0 && d.weekChange > 0) { outlook = 'BULLISH'; outlookClass = 'badge-green'; }
+
+    const pills = [];
+    pills.push(`<span class="indicator-pill ${outlookClass}">${outlook}</span>`);
+    if (d.aboveSMA20 === false) pills.push('<span class="indicator-pill badge-red">Below 20MA</span>');
+    if (d.aboveSMA20 === true) pills.push('<span class="indicator-pill badge-green">Above 20MA</span>');
+    if (d.rsi && d.rsi < 30) pills.push('<span class="indicator-pill badge-red">Oversold</span>');
+    if (d.rsi && d.rsi > 70) pills.push('<span class="indicator-pill badge-green">Overbought</span>');
+    if (d.volRatio > 1.3) pills.push('<span class="indicator-pill badge-amber">High Vol</span>');
+
+    return `
+      <div class="ticker-card">
+        <div class="ticker-top">
+          <div><div class="ticker-symbol">${t.symbol}</div><div class="ticker-name">${t.name}</div></div>
+          <div class="ticker-price">
+            <div class="price">${fmtPrice(d.currentPrice)}</div>
+            <div class="change" style="color: ${dayColor};">${fmtPct(d.dayChange)}</div>
+          </div>
+        </div>
+        <div class="ticker-stats">
+          <div class="ticker-stat"><div class="stat-label">Week</div><div class="stat-val" style="color: ${weekColor};">${fmtPct(d.weekChange)}</div></div>
+          <div class="ticker-stat"><div class="stat-label">Month</div><div class="stat-val" style="color: ${monthColor};">${fmtPct(d.monthChange)}</div></div>
+          <div class="ticker-stat"><div class="stat-label">RSI</div><div class="stat-val" style="color: ${rsiColor};">${d.rsi ? fmt(d.rsi, 0) : '--'}</div></div>
+        </div>
+        <div class="ticker-levels">
+          <div class="level-box support"><div class="level-label">Support</div><div class="level-val" style="color: var(--green);">${fmtPrice(d.support)}</div></div>
+          <div class="level-box resistance"><div class="level-label">Resistance</div><div class="level-val" style="color: var(--red);">${fmtPrice(d.resistance)}</div></div>
+        </div>
+        <div class="ticker-indicators">${pills.join('')}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderSectors(sectorData) {
+  const grid = document.getElementById('sector-grid');
+  const sorted = [...SECTOR_ETFS].sort((a, b) => {
+    const da = sectorData[a.symbol];
+    const db = sectorData[b.symbol];
+    if (!da || !db) return 0;
+    return db.dayChange - da.dayChange;
+  });
+
+  grid.innerHTML = sorted.map(s => {
+    const d = sectorData[s.symbol];
+    if (!d) return `<div class="heat-cell flat"><div class="sector-name">${s.name}</div><div class="sector-perf">--</div></div>`;
+    const cls = d.dayChange > 0.05 ? 'up' : d.dayChange < -0.05 ? 'down' : 'flat';
+    return `
+      <div class="heat-cell ${cls}">
+        <div class="sector-name">${s.name}</div>
+        <div class="sector-perf">${fmtPct(d.dayChange)}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderBottomLine(tickerData, fg, vixData) {
+  const el = document.getElementById('bottom-line-text');
+
+  const spyData = tickerData['SPY'];
+  const qqq = tickerData['QQQ'];
+  const nvda = tickerData['NVDA'];
+  const tsla = tickerData['TSLA'];
+
+  if (!spyData) { el.textContent = 'Unable to generate analysis — market data unavailable.'; return; }
+
+  const fgScore = fg ? Math.round(fg.score) : null;
+  const vix = vixData ? vixData.currentPrice : null;
+
+  // Find most oversold
+  const oversoldTickers = TICKERS.filter(t => !t.isIndex && tickerData[t.symbol]?.rsi)
+    .map(t => ({ symbol: t.symbol, rsi: tickerData[t.symbol].rsi }))
+    .filter(t => t.rsi < 35)
+    .sort((a, b) => a.rsi - b.rsi);
+
+  // Find strongest
+  const strongest = TICKERS.filter(t => !t.isIndex && tickerData[t.symbol]?.dayChange != null)
+    .map(t => ({ symbol: t.symbol, change: tickerData[t.symbol].dayChange }))
+    .sort((a, b) => b.change - a.change);
+
+  let lines = [];
+
+  // Market state
+  if (spyData.weekChange < -2) {
+    lines.push(`Markets are under pressure with SPY down ${fmtPct(spyData.weekChange)} on the week.`);
+  } else if (spyData.weekChange > 2) {
+    lines.push(`Markets are rallying with SPY up ${fmtPct(spyData.weekChange)} on the week.`);
+  } else {
+    lines.push(`Markets are consolidating with SPY ${fmtPct(spyData.weekChange)} on the week.`);
+  }
+
+  // Sentiment
+  if (fgScore && fgScore <= 25) {
+    lines.push(`Extreme fear (F&G: ${fgScore}) suggests capitulation may be near — watch for a snapback rally.`);
+  } else if (fgScore && fgScore >= 75) {
+    lines.push(`Extreme greed (F&G: ${fgScore}) warrants caution — pullback risk is elevated.`);
+  }
+
+  // VIX
+  if (vix && vix > 25) {
+    lines.push(`Elevated VIX at ${fmt(vix)} signals high uncertainty — size positions conservatively.`);
+  }
+
+  // Oversold opportunities
+  if (oversoldTickers.length > 0) {
+    const names = oversoldTickers.slice(0, 3).map(t => `${t.symbol} (RSI ${fmt(t.rsi, 0)})`).join(', ');
+    lines.push(`Oversold opportunities: ${names} — watch for reversal signals before entering.`);
+  }
+
+  // Strongest name
+  if (strongest.length > 0 && strongest[0].change > 0) {
+    lines.push(`${strongest[0].symbol} showing relative strength at ${fmtPct(strongest[0].change)} — potential leadership if market stabilizes.`);
+  }
+
+  el.textContent = lines.join(' ');
+}
+
+// ═══════════════════════════════════════
+// MAIN FETCH & RENDER
+// ═══════════════════════════════════════
+async function refreshAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('loading');
+  btn.textContent = 'Refreshing...';
+
+  renderHeader();
+
+  // Fetch all data in parallel
+  const allSymbols = [...TICKERS.map(t => t.symbol), ...SECTOR_ETFS.map(s => s.symbol), '^VIX'];
+  const fetches = allSymbols.map(s => fetchYahoo(s));
+  const fgFetch = fetchFearGreed();
+
+  const [results, fg] = await Promise.all([Promise.all(fetches), fgFetch]);
+
+  // Process results
+  const dataMap = {};
+  allSymbols.forEach((symbol, i) => {
+    const processed = processTickerData(results[i]);
+    if (processed) dataMap[symbol] = processed;
+  });
+
+  allData = dataMap;
+
+  // Render
+  const vixData = dataMap['^VIX'] || null;
+  renderSentiment(fg, vixData);
+  renderIndices(dataMap);
+  renderTickers(dataMap);
+  renderSectors(dataMap);
+  renderBottomLine(dataMap, fg, vixData);
+
+  // Update timestamp
+  const now = new Date();
+  document.getElementById('last-updated').textContent =
+    `Last updated: ${now.toLocaleTimeString()} • Auto-refreshes every 60s during market hours • Powered by Yahoo Finance & CNN`;
+
+  btn.classList.remove('loading');
+  btn.textContent = 'Refresh';
+}
+
+// ═══════════════════════════════════════
+// AUTO-REFRESH
+// ═══════════════════════════════════════
+function isMarketHours() {
+  const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hours = et.getHours();
+  const mins = et.getMinutes();
+  const time = hours * 60 + mins;
+  return time >= 570 && time <= 960; // 9:30 AM - 4:00 PM ET
+}
+
+// Initial load
+refreshAll();
+
+// Auto-refresh every 60s during market hours, every 5min outside
+setInterval(() => {
+  refreshAll();
+}, isMarketHours() ? 60000 : 300000);
+</script>
 </body>
 </html>
