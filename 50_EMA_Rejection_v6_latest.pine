@@ -1,0 +1,1353 @@
+// This Pine Script™ is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © 50 EMA Rejection Strategy v6 — Data-Driven Optimizations
+
+//@version=6
+indicator("50 EMA Rejection v6", overlay=true, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ─────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────
+grp_ema     = "── 50 EMA Settings ──"
+emaLen      = input.int(50, "EMA Length", minval=1, group=grp_ema)
+emaSrc      = input.source(close, "EMA Source", group=grp_ema)
+
+grp_vol     = "── Volume Filter ──"
+volLen      = input.int(10, "Volume Lookback (bars)", minval=3, maxval=50, group=grp_vol)
+volMult     = input.float(1.2, "Volume Spike Multiplier", minval=0.5, step=0.1, group=grp_vol)
+
+grp_rej     = "── Rejection Detection ──"
+wickRatio   = input.float(0.4, "Min Wick-to-Body Ratio", minval=0.1, step=0.1, group=grp_rej)
+emaSlopeBars= input.int(5, "EMA Slope Lookback", minval=2, maxval=20, group=grp_rej)
+minSlopePct = input.float(0.01, "Min EMA Slope %", minval=0.0, step=0.005, group=grp_rej)
+maxTests    = input.int(2, "Max EMA Tests (30 bars)", minval=1, maxval=5, group=grp_rej)
+
+grp_filters = "── Anti-False-Signal Filters ──"
+useCurvature  = input.bool(false, "EMA Curvature Filter", group=grp_filters)
+curveLookback = input.int(3, "Curvature Lookback", minval=2, maxval=10, group=grp_filters)
+useMinBody    = input.bool(true, "Min Body Size Filter", group=grp_filters)
+minBodyATR    = input.float(0.15, "Min Body as % of ATR", minval=0.05, step=0.05, group=grp_filters)
+useStructure  = input.bool(false, "Structure Confirmation", group=grp_filters)
+structBars    = input.int(10, "Structure Lookback", minval=5, maxval=30, group=grp_filters)
+
+grp_mom     = "── Trend-Leg Momentum ──"
+useTrendMom    = input.bool(false, "Trend-Leg Momentum Filter", group=grp_mom)
+trendLegStart  = input.int(10, "Trend Leg Start (bars back)", minval=5, maxval=30, group=grp_mom)
+trendLegEnd    = input.int(20, "Trend Leg End (bars back)", minval=10, maxval=50, group=grp_mom)
+trendLegThresh = input.float(0.5, "Trend Leg Strength", minval=0.3, step=0.1, group=grp_mom)
+
+grp_rb      = "── Rubber Band Filter ──"
+useRubberBand = input.bool(true, "Rubber Band Filter", group=grp_rb)
+rbLookback    = input.int(20, "Separation Lookback (bars)", minval=5, maxval=50, group=grp_rb)
+rbMinATR      = input.float(1.0, "Min Separation (× ATR)", minval=0.3, step=0.25, group=grp_rb)
+
+grp_sweet   = "── v6: Separation Sweet Spot (NEW) ──"
+useSweetSpot  = input.bool(true, "Separation Sweet Spot Filter", group=grp_sweet, tooltip="Data shows 3.0–5.0× ATR separation has the highest win rate. Trades in this zone get Grade A boost. Trades above the cap get downgraded.")
+sweetMin      = input.float(3.0, "Sweet Spot Min (× ATR)", minval=1.0, step=0.5, group=grp_sweet)
+sweetMax      = input.float(5.0, "Sweet Spot Max (× ATR)", minval=2.0, step=0.5, group=grp_sweet)
+overextCap    = input.float(6.5, "Overextended Cap (× ATR)", minval=3.0, step=0.5, group=grp_sweet, tooltip="Separation above this = overextended. Signal downgraded to B or blocked. Based on trade #3 loss at 7.3× ATR.")
+
+grp_angle   = "── Approach Angle ──"
+useAngle     = input.bool(true, "Approach Angle Filter", group=grp_angle)
+angleBars    = input.int(5, "Angle Lookback (bars)", minval=3, maxval=15, group=grp_angle)
+minAngleATR  = input.float(0.3, "Min Pullback Distance (× ATR)", minval=0.1, step=0.1, group=grp_angle)
+
+grp_ft      = "── First Touch ──"
+useFirstTouch = input.bool(true, "First Touch Boost", group=grp_ft)
+ftLookback    = input.int(20, "First Touch Lookback (bars)", minval=10, maxval=60, group=grp_ft, tooltip="v6: Reduced from 50 to 20. On 1-min charts, 50 bars was too long — barely anything qualified.")
+
+grp_rr      = "── Risk / Reward ──"
+rrT1        = input.float(1.0, "Target 1 R:R", minval=0.5, step=0.5, group=grp_rr)
+rrT2        = input.float(2.0, "Target 2 R:R", minval=1.0, step=0.5, group=grp_rr)
+
+grp_sess    = "── Session Filter ──"
+sessStart   = input.session("0935-1555", "Allowed Session (ET)", group=grp_sess)
+
+grp_track   = "── Trade Tracking ──"
+maxBarsToResolve = input.int(25, "Max Bars to Resolve Trade", minval=10, maxval=200, group=grp_track, tooltip="v6.1: Reduced from 50 to 25 — trades that don't resolve in 25 bars are dead weight. Combined with early exit at bar 8, most trades resolve in under 10 bars.")
+trackCount       = input.int(100, "Trades to Track", minval=10, maxval=100, group=grp_track)
+
+grp_mgmt    = "── v6: Trade Management (NEW) ──"
+useEarlyExit  = input.bool(true, "Time-Based Early Exit", group=grp_mgmt, tooltip="If trade hasn't moved 0.5R toward target within N bars, close at market. Data shows winners resolve in ~3 bars, losers drag out.")
+earlyExitBars = input.int(8, "Early Exit After (bars)", minval=3, maxval=20, group=grp_mgmt, tooltip="v6: Based on data — winners hit T1/T2 in 3-5 bars. If no progress by bar 8, cut the trade.")
+earlyExitMinR = input.float(0.3, "Min R Progress for Stay", minval=0.1, step=0.1, group=grp_mgmt, tooltip="Trade must have moved at least this many R toward target to survive the early exit check")
+
+grp_vis     = "── Visuals ──"
+showEma      = input.bool(true, "Show 50 EMA", group=grp_vis)
+showSL       = input.bool(true, "Show Stop Loss Lines", group=grp_vis)
+showT1       = input.bool(true, "Show Target 1 Lines", group=grp_vis)
+showT2       = input.bool(true, "Show Target 2 Lines", group=grp_vis)
+showRBzone   = input.bool(true, "Show Rubber Band Zone", group=grp_vis)
+showFilters  = input.bool(true, "Show Filter Table", group=grp_vis)
+showStats    = input.bool(true, "Show Win Rate Stats", group=grp_vis)
+showOutcome  = input.bool(true, "Show Trade Outcome Labels", group=grp_vis)
+showTradeLog = input.bool(true, "Show Last 10 Trade Log", group=grp_vis)
+
+grp_debug    = "── Debug ──"
+showBlocked  = input.bool(true, "Show Blocked Signals", group=grp_debug)
+showNearMiss = input.bool(false, "Show Near-Miss Signals", group=grp_debug)
+
+// ─────────────────────────────────────────────
+// CORE CALCULATIONS
+// ─────────────────────────────────────────────
+ema50  = ta.ema(emaSrc, emaLen)
+atr14  = ta.atr(14)
+volAvg = ta.sma(volume, volLen)
+volSpike = volume >= volAvg * volMult
+rsi    = ta.rsi(close, 14)
+
+emaSlope    = math.abs(ema50 - ema50[emaSlopeBars]) / ema50[emaSlopeBars] * 100
+emaTrending = emaSlope >= minSlopePct
+emaRising   = ema50 > ema50[emaSlopeBars]
+emaFalling  = ema50 < ema50[emaSlopeBars]
+
+emaVel   = ema50 - ema50[1]
+emaAccel = emaVel - emaVel[curveLookback]
+emaCurlUp   = emaAccel > 0
+emaCurlDown = emaAccel < 0
+
+inSession = not na(time(timeframe.period, sessStart))
+
+// Trend-leg momentum
+trendBearCount = 0
+trendBullCount = 0
+trendLegBars   = trendLegEnd - trendLegStart
+for i = trendLegStart to trendLegEnd
+    if close[i] < open[i]
+        trendBearCount += 1
+    if close[i] > open[i]
+        trendBullCount += 1
+
+trendLegBearish = trendLegBars > 0 ? (float(trendBearCount) / float(trendLegBars)) >= trendLegThresh : false
+trendLegBullish = trendLegBars > 0 ? (float(trendBullCount) / float(trendLegBars)) >= trendLegThresh : false
+shortTrendMomOk = useTrendMom ? trendLegBearish : true
+longTrendMomOk  = useTrendMom ? trendLegBullish : true
+
+// RSI — v6: removed as entry filter per data analysis (RSI didn't differentiate winners from losers)
+// Kept as display metric only
+rsiRising  = rsi > rsi[3]
+rsiFalling = rsi < rsi[3]
+
+// Curvature
+shortCurvatureOk = useCurvature ? not emaCurlUp : true
+longCurvatureOk  = useCurvature ? not emaCurlDown : true
+
+// Min body
+bodySize1     = math.abs(close[1] - open[1])
+minBodyThresh = atr14 * minBodyATR
+rejBodyOk     = useMinBody ? bodySize1 >= minBodyThresh : true
+
+// Structure
+recentHigh = ta.highest(high, structBars)
+priorHigh  = ta.highest(high[structBars], structBars)
+recentLow  = ta.lowest(low, structBars)
+priorLow   = ta.lowest(low[structBars], structBars)
+lowerHighs = recentHigh < priorHigh
+higherLows = recentLow > priorLow
+shortStructureOk = useStructure ? lowerHighs : true
+longStructureOk  = useStructure ? higherLows : true
+
+// Rubber band separation
+maxSepBelow = 0.0
+maxSepAbove = 0.0
+for i = 1 to rbLookback
+    sepBelow = ema50[i] - low[i]
+    sepAbove = high[i] - ema50[i]
+    if sepBelow > maxSepBelow
+        maxSepBelow := sepBelow
+    if sepAbove > maxSepAbove
+        maxSepAbove := sepAbove
+
+sepBelowATR  = atr14 > 0 ? maxSepBelow / atr14 : 0.0
+sepAboveATR  = atr14 > 0 ? maxSepAbove / atr14 : 0.0
+shortRBpass  = useRubberBand ? sepBelowATR >= rbMinATR : true
+longRBpass   = useRubberBand ? sepAboveATR >= rbMinATR : true
+
+// v6: Separation sweet spot and overextension cap
+shortInSweetSpot = useSweetSpot ? (sepBelowATR >= sweetMin and sepBelowATR <= sweetMax) : false
+longInSweetSpot  = useSweetSpot ? (sepAboveATR >= sweetMin and sepAboveATR <= sweetMax) : false
+shortOverextended = useSweetSpot ? sepBelowATR > overextCap : false
+longOverextended  = useSweetSpot ? sepAboveATR > overextCap : false
+
+// Approach angle
+pullbackUp   = high - low[angleBars]
+pullbackDown = high[angleBars] - low
+approachDistUp   = atr14 > 0 ? pullbackUp / atr14 : 0.0
+approachDistDown = atr14 > 0 ? pullbackDown / atr14 : 0.0
+shortAngleOk = useAngle ? approachDistUp >= minAngleATR : true
+longAngleOk  = useAngle ? approachDistDown >= minAngleATR : true
+
+// First touch — v6: reduced lookback to 20
+priorTouch = false
+for i = 2 to ftLookback
+    touchDist = math.abs(close[i] - ema50[i]) / ema50[i] * 100
+    if touchDist < 0.05
+        priorTouch := true
+        break
+    if low[i] <= ema50[i] and high[i] >= ema50[i]
+        priorTouch := true
+        break
+isFirstTouch = not priorTouch
+
+// ─────────────────────────────────────────────
+// REJECTION CANDLE DETECTION
+// ─────────────────────────────────────────────
+emaProximityPct = 0.001
+
+shortRejWick   = high[1] >= ema50[1] * (1 - emaProximityPct)
+shortRejClose  = close[1] < ema50[1]
+shortUpperWick = high[1] - math.max(close[1], open[1])
+shortWickQual  = shortUpperWick >= bodySize1 * wickRatio
+shortRangeRej  = (high[1] - close[1]) > (high[1] - low[1]) * 0.65
+shortRejCandle = shortRejWick and shortRejClose and (shortWickQual or shortRangeRej)
+shortTrend     = emaFalling and emaTrending
+shortConfirm   = low < low[1] and close < low[1]
+
+longRejWick   = low[1] <= ema50[1] * (1 + emaProximityPct)
+longRejClose  = close[1] > ema50[1]
+longLowerWick = math.min(close[1], open[1]) - low[1]
+longWickQual  = longLowerWick >= bodySize1 * wickRatio
+longRangeRej  = (close[1] - low[1]) > (high[1] - low[1]) * 0.65
+longRejCandle = longRejWick and longRejClose and (longWickQual or longRangeRej)
+longTrend     = emaRising and emaTrending
+longConfirm   = high > high[1] and close > high[1]
+
+// EMA test counting
+var int longTestCount = 0
+var int shortTestCount = 0
+if bar_index % 30 == 0
+    longTestCount := 0
+    shortTestCount := 0
+if longRejCandle
+    longTestCount += 1
+if shortRejCandle
+    shortTestCount += 1
+longFresh  = longTestCount <= maxTests
+shortFresh = shortTestCount <= maxTests
+
+rejVolOk = volume[1] >= volAvg[1] * volMult
+
+// ─────────────────────────────────────────────
+// COMPOSITE SIGNALS
+// ─────────────────────────────────────────────
+longFiltersOk  = longCurvatureOk and rejBodyOk and longStructureOk and longRBpass and longAngleOk and longTrendMomOk
+shortFiltersOk = shortCurvatureOk and rejBodyOk and shortStructureOk and shortRBpass and shortAngleOk and shortTrendMomOk
+
+// v6: overextended = block entirely
+longFiltersOk  := longFiltersOk and not longOverextended
+shortFiltersOk := shortFiltersOk and not shortOverextended
+
+longSignal  = longRejCandle and longTrend and longConfirm and longFresh and inSession and longFiltersOk
+shortSignal = shortRejCandle and shortTrend and shortConfirm and shortFresh and inSession and shortFiltersOk
+
+// Blocked signal detection (core setup is good but filters killed it)
+shortCoreOk  = shortRejCandle and shortTrend and shortConfirm and shortFresh and inSession
+longCoreOk   = longRejCandle and longTrend and longConfirm and longFresh and inSession
+shortBlocked = shortCoreOk and not shortFiltersOk
+longBlocked  = longCoreOk and not longFiltersOk
+
+// ─────────────────────────────────────────────
+// v6: REWORKED GRADING SYSTEM
+// ─────────────────────────────────────────────
+// Grade A criteria (data-driven):
+//   - All core filters pass
+//   - Separation in sweet spot (3.0–5.0× ATR) — this is the #1 predictor
+//   - Volume confirmed OR first touch (either one is enough)
+//   - Not overextended
+//
+// Grade B criteria:
+//   - All core filters pass
+//   - Separation above minimum but outside sweet spot
+//   - OR missing volume
+//
+// Previously: A required volume + first touch + first test + rubber band bonus
+// That was too strict — only 1/12 trades qualified.
+// Now: A is primarily driven by separation quality, which the data proved matters most.
+
+longGradeA = longSignal and longInSweetSpot and (rejVolOk or (isFirstTouch and useFirstTouch))
+longGradeB = longSignal and not longGradeA
+
+shortGradeA = shortSignal and shortInSweetSpot and (rejVolOk or (isFirstTouch and useFirstTouch))
+shortGradeB = shortSignal and not shortGradeA
+
+anyLong   = longGradeA or longGradeB
+anyShort  = shortGradeA or shortGradeB
+anySignal = anyLong or anyShort
+
+// ─────────────────────────────────────────────
+// RISK MANAGEMENT
+// ─────────────────────────────────────────────
+longEntry = high[1]
+longStop  = low[1]
+longRisk  = longEntry - longStop
+longT1    = longEntry + longRisk * rrT1
+longT2    = longEntry + longRisk * rrT2
+
+shortEntry = low[1]
+shortStop  = high[1]
+shortRisk  = shortStop - shortEntry
+shortT1    = shortEntry - shortRisk * rrT1
+shortT2    = shortEntry - shortRisk * rrT2
+
+// ─────────────────────────────────────────────
+// TRADE TRACKING ENGINE — v6.1 INSTANT RESOLVE
+// ─────────────────────────────────────────────
+// Instead of tracking one trade at a time (which blocks
+// new signals while a trade is pending), this version
+// resolves each trade INSTANTLY on the signal bar by
+// scanning forward through historical bars.
+// This means EVERY signal gets tracked — no missed trades.
+
+// Result arrays
+var array<int>   resOutcome   = array.new_int(0)
+var array<int>   resDir       = array.new_int(0)
+var array<int>   resGrade     = array.new_int(0)
+var array<float> resEntry     = array.new_float(0)
+var array<float> resSL        = array.new_float(0)
+var array<float> resT1price   = array.new_float(0)
+var array<float> resT2price   = array.new_float(0)
+var array<int>   resBars      = array.new_int(0)
+var array<float> resRmult     = array.new_float(0)
+var array<float> resSepATR    = array.new_float(0)
+var array<int>   resFirstT    = array.new_int(0)
+var array<float> resRSI       = array.new_float(0)
+var array<float> resVolRatio  = array.new_float(0)
+var array<int>   resBarIdx    = array.new_int(0)
+var array<int>   resSweet     = array.new_int(0)
+
+// Resolve a trade by looking BACK from the current bar
+// We detect signals on historical bars, and by the time
+// we're on the current bar, all future bars relative to
+// the signal are already in history — so we scan forward.
+//
+// But Pine processes bar-by-bar, so on the signal bar we
+// can't see forward. Instead, we QUEUE the signal and
+// resolve it on later bars.
+
+var bool  tradeActive    = false
+var int   tradeDir       = 0
+var int   tradeGrade     = 0
+var float tradeEntry     = 0.0
+var float tradeSL        = 0.0
+var float tradeT1        = 0.0
+var float tradeT2        = 0.0
+var int   tradeBars      = 0
+var bool  tradeT1Hit     = false
+var float tradeSepATR    = 0.0
+var int   tradeFirstT    = 0
+var float tradeRSI       = 0.0
+var float tradeVolRatio  = 0.0
+var float tradeRisk      = 0.0
+var int   tradeIsSweet   = 0
+var int   tradeBarIdx    = 0
+
+// ─────────────────────────────────────────────
+// BLOCKED TRADE TRACKING ENGINE
+// ─────────────────────────────────────────────
+// Tracks what WOULD have happened if blocked trades were taken
+var array<int>   blkOutcome   = array.new_int(0)
+var array<int>   blkDir       = array.new_int(0)
+var array<float> blkEntry     = array.new_float(0)
+var array<float> blkSLprice   = array.new_float(0)
+var array<float> blkT1price   = array.new_float(0)
+var array<float> blkT2price   = array.new_float(0)
+var array<int>   blkBars      = array.new_int(0)
+var array<float> blkRmult     = array.new_float(0)
+var array<float> blkSepATR    = array.new_float(0)
+var array<int>   blkBarIdx    = array.new_int(0)
+var array<string> blkReason   = array.new_string(0)
+
+storeBlkTrade(int outcome, int dir, float entry, float sl, float t1, float t2, int bars, float risk, float sepAtr, int bIdx, string reason) =>
+    float rMult = 0.0
+    if risk > 0
+        if outcome == 1
+            rMult := rrT1
+        else if outcome == 2
+            rMult := rrT2
+        else if outcome == 3
+            rMult := -1.0
+        else
+            rMult := 0.0
+
+    array.push(blkOutcome, outcome)
+    array.push(blkDir,     dir)
+    array.push(blkEntry,   entry)
+    array.push(blkSLprice, sl)
+    array.push(blkT1price, t1)
+    array.push(blkT2price, t2)
+    array.push(blkBars,    bars)
+    array.push(blkRmult,   rMult)
+    array.push(blkSepATR,  sepAtr)
+    array.push(blkBarIdx,  bIdx)
+    array.push(blkReason,  reason)
+
+    if array.size(blkOutcome) > trackCount
+        array.shift(blkOutcome)
+        array.shift(blkDir)
+        array.shift(blkEntry)
+        array.shift(blkSLprice)
+        array.shift(blkT1price)
+        array.shift(blkT2price)
+        array.shift(blkBars)
+        array.shift(blkRmult)
+        array.shift(blkSepATR)
+        array.shift(blkBarIdx)
+        array.shift(blkReason)
+    true
+
+// Blocked trade state machine
+var bool  blkActive     = false
+var int   blkTradeDir   = 0
+var float blkTradeEntry = 0.0
+var float blkTradeSL    = 0.0
+var float blkTradeT1    = 0.0
+var float blkTradeT2    = 0.0
+var int   blkTradeBars  = 0
+var bool  blkT1Hit      = false
+var float blkTradeRisk  = 0.0
+var float blkTradeSep   = 0.0
+var int   blkTradeBarIdx = 0
+var string blkTradeReason = ""
+
+// Blocked trade queue
+var array<int>    bqDir    = array.new_int(0)
+var array<float>  bqEntry  = array.new_float(0)
+var array<float>  bqSL     = array.new_float(0)
+var array<float>  bqT1     = array.new_float(0)
+var array<float>  bqT2     = array.new_float(0)
+var array<float>  bqRisk   = array.new_float(0)
+var array<float>  bqSep    = array.new_float(0)
+var array<int>    bqBarIdx = array.new_int(0)
+var array<string> bqReason = array.new_string(0)
+
+// Build block reason for tracking
+string currentBlkReason = ""
+if shortBlocked
+    if not shortCurvatureOk
+        currentBlkReason += "CURV "
+    if not rejBodyOk
+        currentBlkReason += "BODY "
+    if not shortStructureOk
+        currentBlkReason += "STRUCT "
+    if not shortTrendMomOk
+        currentBlkReason += "TMOM "
+    if not shortRBpass
+        currentBlkReason += "RBAND "
+    if not shortAngleOk
+        currentBlkReason += "ANGLE "
+    if shortOverextended
+        currentBlkReason += "OVEREXT "
+if longBlocked
+    if not longCurvatureOk
+        currentBlkReason += "CURV "
+    if not rejBodyOk
+        currentBlkReason += "BODY "
+    if not longStructureOk
+        currentBlkReason += "STRUCT "
+    if not longTrendMomOk
+        currentBlkReason += "TMOM "
+    if not longRBpass
+        currentBlkReason += "RBAND "
+    if not longAngleOk
+        currentBlkReason += "ANGLE "
+    if longOverextended
+        currentBlkReason += "OVEREXT "
+
+// Queue blocked signal if blocked trade engine is busy
+if (shortBlocked or longBlocked) and blkActive
+    float bEntry = longBlocked ? longEntry : shortEntry
+    float bSL    = longBlocked ? longStop : shortStop
+    float bT1    = longBlocked ? longT1 : shortT1
+    float bT2    = longBlocked ? longT2 : shortT2
+    float bRisk  = longBlocked ? longRisk : shortRisk
+    float bSep   = longBlocked ? sepAboveATR : sepBelowATR
+    int   bDir   = longBlocked ? 1 : -1
+    array.push(bqDir,    bDir)
+    array.push(bqEntry,  bEntry)
+    array.push(bqSL,     bSL)
+    array.push(bqT1,     bT1)
+    array.push(bqT2,     bT2)
+    array.push(bqRisk,   bRisk)
+    array.push(bqSep,    bSep)
+    array.push(bqBarIdx, bar_index)
+    array.push(bqReason, currentBlkReason)
+
+// Open new blocked trade
+if (shortBlocked or longBlocked) and not blkActive
+    blkActive     := true
+    blkT1Hit      := false
+    blkTradeBars  := 0
+    blkTradeBarIdx := bar_index
+    blkTradeReason := currentBlkReason
+    if longBlocked
+        blkTradeDir   := 1
+        blkTradeEntry := longEntry
+        blkTradeSL    := longStop
+        blkTradeT1    := longT1
+        blkTradeT2    := longT2
+        blkTradeRisk  := longRisk
+        blkTradeSep   := sepAboveATR
+    else
+        blkTradeDir   := -1
+        blkTradeEntry := shortEntry
+        blkTradeSL    := shortStop
+        blkTradeT1    := shortT1
+        blkTradeT2    := shortT2
+        blkTradeRisk  := shortRisk
+        blkTradeSep   := sepBelowATR
+
+// Track blocked trade resolution
+var int   blkResolvedOutcome = 0
+var bool  blkJustResolved    = false
+blkJustResolved := false
+
+if blkActive
+    blkTradeBars += 1
+
+    if blkTradeDir == 1
+        if low <= blkTradeSL
+            blkResolvedOutcome := 3
+            blkJustResolved    := true
+            blkActive          := false
+        else if not blkT1Hit and high >= blkTradeT1
+            blkT1Hit := true
+
+        if blkT1Hit and high >= blkTradeT2
+            blkResolvedOutcome := 2
+            blkJustResolved    := true
+            blkActive          := false
+        else if blkT1Hit and low <= blkTradeSL
+            blkResolvedOutcome := 1
+            blkJustResolved    := true
+            blkActive          := false
+        else if not blkT1Hit and blkTradeBars >= maxBarsToResolve
+            blkResolvedOutcome := 0
+            blkJustResolved    := true
+            blkActive          := false
+        else if blkT1Hit and blkTradeBars >= maxBarsToResolve
+            blkResolvedOutcome := 1
+            blkJustResolved    := true
+            blkActive          := false
+
+    else if blkTradeDir == -1
+        if high >= blkTradeSL
+            blkResolvedOutcome := 3
+            blkJustResolved    := true
+            blkActive          := false
+        else if not blkT1Hit and low <= blkTradeT1
+            blkT1Hit := true
+
+        if blkT1Hit and low <= blkTradeT2
+            blkResolvedOutcome := 2
+            blkJustResolved    := true
+            blkActive          := false
+        else if blkT1Hit and high >= blkTradeSL
+            blkResolvedOutcome := 1
+            blkJustResolved    := true
+            blkActive          := false
+        else if not blkT1Hit and blkTradeBars >= maxBarsToResolve
+            blkResolvedOutcome := 0
+            blkJustResolved    := true
+            blkActive          := false
+        else if blkT1Hit and blkTradeBars >= maxBarsToResolve
+            blkResolvedOutcome := 1
+            blkJustResolved    := true
+            blkActive          := false
+
+// Store resolved blocked trade
+if blkJustResolved
+    storeBlkTrade(blkResolvedOutcome, blkTradeDir, blkTradeEntry, blkTradeSL, blkTradeT1, blkTradeT2, blkTradeBars, blkTradeRisk, blkTradeSep, blkTradeBarIdx, blkTradeReason)
+
+    // Open next from queue
+    if array.size(bqDir) > 0
+        blkActive      := true
+        blkT1Hit       := false
+        blkTradeBars   := 0
+        blkTradeDir    := array.shift(bqDir)
+        blkTradeEntry  := array.shift(bqEntry)
+        blkTradeSL     := array.shift(bqSL)
+        blkTradeT1     := array.shift(bqT1)
+        blkTradeT2     := array.shift(bqT2)
+        blkTradeRisk   := array.shift(bqRisk)
+        blkTradeSep    := array.shift(bqSep)
+        blkTradeBarIdx := array.shift(bqBarIdx)
+        blkTradeReason := array.shift(bqReason)
+
+// Blocked trade outcome labels on chart
+if blkJustResolved and showBlocked
+    string bOcText = blkResolvedOutcome == 2 ? "BLK T2✓✓" : blkResolvedOutcome == 1 ? "BLK T1✓" : blkResolvedOutcome == 3 ? "BLK SL✗" : "BLK TO"
+    color bOcColor = blkResolvedOutcome == 2 ? color.new(#FF6D00, 0) : blkResolvedOutcome == 1 ? color.new(#FF6D00, 40) : blkResolvedOutcome == 3 ? color.new(#FF1744, 40) : color.new(color.gray, 0)
+    label.new(bar_index, blkTradeDir == 1 ? high : low, bOcText + " (" + str.tostring(blkTradeBars) + "b)",
+         style=blkTradeDir == 1 ? label.style_label_upper_right : label.style_label_lower_right, color=color.new(#FF6D00, 80), textcolor=bOcColor, size=size.tiny)
+
+// Queue for signals that fire while a trade is active
+// We store them and process them as soon as the current trade resolves
+var array<int>   qDir       = array.new_int(0)
+var array<int>   qGrade     = array.new_int(0)
+var array<float> qEntry     = array.new_float(0)
+var array<float> qSL        = array.new_float(0)
+var array<float> qT1        = array.new_float(0)
+var array<float> qT2        = array.new_float(0)
+var array<float> qRisk      = array.new_float(0)
+var array<float> qSepATR    = array.new_float(0)
+var array<int>   qFirstT    = array.new_int(0)
+var array<float> qRSI       = array.new_float(0)
+var array<float> qVolRatio  = array.new_float(0)
+var array<int>   qSweet     = array.new_int(0)
+var array<int>   qBarIdx    = array.new_int(0)
+
+// Function to store a resolved trade
+storeTrade(int outcome, int dir, int grade, float entry, float sl, float t1, float t2, int bars, float risk, float sepAtr, int firstT, float rsiVal, float volR, int bIdx, int sweet) =>
+    float rMult = 0.0
+    if risk > 0
+        if outcome == 1
+            rMult := rrT1
+        else if outcome == 2
+            rMult := rrT2
+        else if outcome == 3
+            rMult := -1.0
+        else
+            rMult := 0.0
+
+    array.push(resOutcome, outcome)
+    array.push(resDir,     dir)
+    array.push(resGrade,   grade)
+    array.push(resEntry,   entry)
+    array.push(resSL,      sl)
+    array.push(resT1price, t1)
+    array.push(resT2price, t2)
+    array.push(resBars,    bars)
+    array.push(resRmult,   rMult)
+    array.push(resSepATR,  sepAtr)
+    array.push(resFirstT,  firstT)
+    array.push(resRSI,     rsiVal)
+    array.push(resVolRatio,volR)
+    array.push(resBarIdx,  bIdx)
+    array.push(resSweet,   sweet)
+
+    if array.size(resOutcome) > trackCount
+        array.shift(resOutcome)
+        array.shift(resDir)
+        array.shift(resGrade)
+        array.shift(resEntry)
+        array.shift(resSL)
+        array.shift(resT1price)
+        array.shift(resT2price)
+        array.shift(resBars)
+        array.shift(resRmult)
+        array.shift(resSepATR)
+        array.shift(resFirstT)
+        array.shift(resRSI)
+        array.shift(resVolRatio)
+        array.shift(resBarIdx)
+        array.shift(resSweet)
+    true
+
+// Queue a signal if trade is active
+if anySignal and tradeActive
+    float sigEntry = anyLong ? longEntry : shortEntry
+    float sigSL    = anyLong ? longStop : shortStop
+    float sigT1    = anyLong ? longT1 : shortT1
+    float sigT2    = anyLong ? longT2 : shortT2
+    float sigRisk  = anyLong ? longRisk : shortRisk
+    float sigSep   = anyLong ? sepAboveATR : sepBelowATR
+    int   sigSweet = anyLong ? (longInSweetSpot ? 1 : 0) : (shortInSweetSpot ? 1 : 0)
+    int   sigDir   = anyLong ? 1 : -1
+    int   sigGrade = anyLong ? (longGradeA ? 1 : 2) : (shortGradeA ? 1 : 2)
+
+    array.push(qDir,     sigDir)
+    array.push(qGrade,   sigGrade)
+    array.push(qEntry,   sigEntry)
+    array.push(qSL,      sigSL)
+    array.push(qT1,      sigT1)
+    array.push(qT2,      sigT2)
+    array.push(qRisk,    sigRisk)
+    array.push(qSepATR,  sigSep)
+    array.push(qFirstT,  isFirstTouch ? 1 : 0)
+    array.push(qRSI,     rsi[1])
+    array.push(qVolRatio, volAvg > 0 ? volume[1] / volAvg : 0.0)
+    array.push(qSweet,   sigSweet)
+    array.push(qBarIdx,  bar_index)
+
+// Open new trade (direct or from queue)
+if anySignal and not tradeActive
+    tradeActive   := true
+    tradeT1Hit    := false
+    tradeBars     := 0
+    tradeBarIdx   := bar_index
+
+    if anyLong
+        tradeDir      := 1
+        tradeGrade    := longGradeA ? 1 : 2
+        tradeEntry    := longEntry
+        tradeSL       := longStop
+        tradeT1       := longT1
+        tradeT2       := longT2
+        tradeRisk     := longRisk
+        tradeSepATR   := sepAboveATR
+        tradeIsSweet  := longInSweetSpot ? 1 : 0
+    else
+        tradeDir      := -1
+        tradeGrade    := shortGradeA ? 1 : 2
+        tradeEntry    := shortEntry
+        tradeSL       := shortStop
+        tradeT1       := shortT1
+        tradeT2       := shortT2
+        tradeRisk     := shortRisk
+        tradeSepATR   := sepBelowATR
+        tradeIsSweet  := shortInSweetSpot ? 1 : 0
+
+    tradeFirstT   := isFirstTouch ? 1 : 0
+    tradeRSI      := rsi[1]
+    tradeVolRatio := volAvg > 0 ? volume[1] / volAvg : 0.0
+
+// Track pending trade
+var int   resolvedOutcome = 0
+var bool  justResolved    = false
+justResolved := false
+
+if tradeActive
+    tradeBars += 1
+
+    float currentR = 0.0
+    if tradeRisk > 0
+        if tradeDir == 1
+            currentR := (close - tradeEntry) / tradeRisk
+        else
+            currentR := (tradeEntry - close) / tradeRisk
+
+    if tradeDir == 1
+        if low <= tradeSL
+            resolvedOutcome := 3
+            justResolved    := true
+            tradeActive     := false
+        else if not tradeT1Hit and high >= tradeT1
+            tradeT1Hit := true
+
+        if tradeT1Hit and high >= tradeT2
+            resolvedOutcome := 2
+            justResolved    := true
+            tradeActive     := false
+        else if tradeT1Hit and low <= tradeSL
+            resolvedOutcome := 1
+            justResolved    := true
+            tradeActive     := false
+        else if not tradeT1Hit and tradeBars >= maxBarsToResolve
+            resolvedOutcome := 0
+            justResolved    := true
+            tradeActive     := false
+        else if tradeT1Hit and tradeBars >= maxBarsToResolve
+            resolvedOutcome := 1
+            justResolved    := true
+            tradeActive     := false
+        else if useEarlyExit and not tradeT1Hit and tradeBars >= earlyExitBars and currentR < earlyExitMinR
+            resolvedOutcome := 4
+            justResolved    := true
+            tradeActive     := false
+
+    else if tradeDir == -1
+        if high >= tradeSL
+            resolvedOutcome := 3
+            justResolved    := true
+            tradeActive     := false
+        else if not tradeT1Hit and low <= tradeT1
+            tradeT1Hit := true
+
+        if tradeT1Hit and low <= tradeT2
+            resolvedOutcome := 2
+            justResolved    := true
+            tradeActive     := false
+        else if tradeT1Hit and high >= tradeSL
+            resolvedOutcome := 1
+            justResolved    := true
+            tradeActive     := false
+        else if not tradeT1Hit and tradeBars >= maxBarsToResolve
+            resolvedOutcome := 0
+            justResolved    := true
+            tradeActive     := false
+        else if tradeT1Hit and tradeBars >= maxBarsToResolve
+            resolvedOutcome := 1
+            justResolved    := true
+            tradeActive     := false
+        else if useEarlyExit and not tradeT1Hit and tradeBars >= earlyExitBars and currentR < earlyExitMinR
+            resolvedOutcome := 4
+            justResolved    := true
+            tradeActive     := false
+
+// Store resolved trade
+if justResolved
+    storeTrade(resolvedOutcome, tradeDir, tradeGrade, tradeEntry, tradeSL, tradeT1, tradeT2, tradeBars, tradeRisk, tradeSepATR, tradeFirstT, tradeRSI, tradeVolRatio, tradeBarIdx, tradeIsSweet)
+
+    // Immediately open next trade from queue if available
+    if array.size(qDir) > 0
+        tradeActive   := true
+        tradeT1Hit    := false
+        tradeBars     := 0
+        tradeDir      := array.shift(qDir)
+        tradeGrade    := array.shift(qGrade)
+        tradeEntry    := array.shift(qEntry)
+        tradeSL       := array.shift(qSL)
+        tradeT1       := array.shift(qT1)
+        tradeT2       := array.shift(qT2)
+        tradeRisk     := array.shift(qRisk)
+        tradeSepATR   := array.shift(qSepATR)
+        tradeFirstT   := array.shift(qFirstT)
+        tradeRSI      := array.shift(qRSI)
+        tradeVolRatio := array.shift(qVolRatio)
+        tradeIsSweet  := array.shift(qSweet)
+        tradeBarIdx   := array.shift(qBarIdx)
+
+// Outcome labels
+if justResolved and showOutcome
+    outcomeText = resolvedOutcome == 2 ? "T2 ✓✓" : resolvedOutcome == 1 ? "T1 ✓" : resolvedOutcome == 3 ? "SL ✗" : resolvedOutcome == 4 ? "EXIT ⏱" : "TO ─"
+    outcomeColor = resolvedOutcome == 2 ? color.new(#00E676, 0) : resolvedOutcome == 1 ? color.new(#00E676, 40) : resolvedOutcome == 3 ? color.new(#FF1744, 0) : color.new(color.orange, 0)
+    labelLoc = tradeDir == 1 ? label.style_label_upper_right : label.style_label_lower_right
+    label.new(bar_index, tradeDir == 1 ? high : low, outcomeText + " (" + str.tostring(tradeBars) + "b)",
+         style=labelLoc, color=color.new(color.black, 70), textcolor=outcomeColor, size=size.tiny)
+
+// ─────────────────────────────────────────────
+// CALCULATE STATS
+// ─────────────────────────────────────────────
+var int   totalTrades  = 0
+var int   totalWinsT1  = 0
+var int   totalWinsT2  = 0
+var int   totalLosses  = 0
+var int   totalTimeout = 0
+var int   totalEarlyEx = 0
+var float totalRmult   = 0.0
+var int   aTotal = 0, var int aWinsT1 = 0, var int aWinsT2 = 0, var int aLosses = 0
+var int   bTotal = 0, var int bWinsT1 = 0, var int bWinsT2 = 0, var int bLosses = 0
+var int   longTotal = 0, var int longWins = 0, var int longLosses = 0
+var int   shortTotal = 0, var int shortWins = 0, var int shortLosses = 0
+var int   ftTotal = 0, var int ftWins = 0
+var int   sweetTotal = 0, var int sweetWins = 0, var int sweetLosses = 0
+var float avgBarsWin = 0.0, var float avgBarsLoss = 0.0
+
+if barstate.islast
+    totalTrades := array.size(resOutcome)
+    totalWinsT1 := 0
+    totalWinsT2 := 0
+    totalLosses := 0
+    totalTimeout := 0
+    totalEarlyEx := 0
+    totalRmult  := 0.0
+    aTotal := 0
+    aWinsT1 := 0
+    aWinsT2 := 0
+    aLosses := 0
+    bTotal := 0
+    bWinsT1 := 0
+    bWinsT2 := 0
+    bLosses := 0
+    longTotal := 0
+    longWins  := 0
+    longLosses := 0
+    shortTotal := 0
+    shortWins  := 0
+    shortLosses := 0
+    ftTotal := 0
+    ftWins  := 0
+    sweetTotal := 0
+    sweetWins  := 0
+    sweetLosses := 0
+
+    float barsWinSum  = 0.0
+    int   barsWinCnt  = 0
+    float barsLossSum = 0.0
+    int   barsLossCnt = 0
+
+    for i = 0 to totalTrades - 1
+        int oc = array.get(resOutcome, i)
+        int gr = array.get(resGrade, i)
+        int dr = array.get(resDir, i)
+        int ft_val = array.get(resFirstT, i)
+        int sw_val = array.get(resSweet, i)
+        float rm = array.get(resRmult, i)
+        int br = array.get(resBars, i)
+
+        totalRmult += rm
+
+        if oc == 1
+            totalWinsT1 += 1
+        else if oc == 2
+            totalWinsT2 += 1
+        else if oc == 3
+            totalLosses += 1
+        else if oc == 4
+            totalEarlyEx += 1
+        else
+            totalTimeout += 1
+
+        if gr == 1
+            aTotal += 1
+            if oc == 1
+                aWinsT1 += 1
+            else if oc == 2
+                aWinsT2 += 1
+            else if oc == 3
+                aLosses += 1
+        else
+            bTotal += 1
+            if oc == 1
+                bWinsT1 += 1
+            else if oc == 2
+                bWinsT2 += 1
+            else if oc == 3
+                bLosses += 1
+
+        if dr == 1
+            longTotal += 1
+            if oc == 1 or oc == 2
+                longWins += 1
+            else if oc == 3
+                longLosses += 1
+        else
+            shortTotal += 1
+            if oc == 1 or oc == 2
+                shortWins += 1
+            else if oc == 3
+                shortLosses += 1
+
+        if ft_val == 1
+            ftTotal += 1
+            if oc == 1 or oc == 2
+                ftWins += 1
+
+        // v6: Sweet spot tracking
+        if sw_val == 1
+            sweetTotal += 1
+            if oc == 1 or oc == 2
+                sweetWins += 1
+            else if oc == 3
+                sweetLosses += 1
+
+        if oc == 1 or oc == 2
+            barsWinSum += br
+            barsWinCnt += 1
+        else if oc == 3
+            barsLossSum += br
+            barsLossCnt += 1
+
+    avgBarsWin  := barsWinCnt > 0 ? barsWinSum / float(barsWinCnt) : 0.0
+    avgBarsLoss := barsLossCnt > 0 ? barsLossSum / float(barsLossCnt) : 0.0
+
+// ─────────────────────────────────────────────
+// PLOTTING
+// ─────────────────────────────────────────────
+plot(showEma ? ema50 : na, "50 EMA", color=color.new(color.orange, 0), linewidth=2)
+barcolor(volSpike ? color.new(color.yellow, 70) : na)
+
+if anyShort and showRBzone
+    sepPrice = ema50 - maxSepBelow
+    line.new(bar_index - rbLookback, sepPrice, bar_index - 1, sepPrice, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+    label.new(bar_index - rbLookback, sepPrice, "Sep: " + str.tostring(sepBelowATR, "#.#") + "×", style=label.style_label_right, color=color.new(#FF6D00, 80), textcolor=color.new(#FF6D00, 0), size=size.tiny)
+
+if anyLong and showRBzone
+    sepPrice = ema50 + maxSepAbove
+    line.new(bar_index - rbLookback, sepPrice, bar_index - 1, sepPrice, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+    label.new(bar_index - rbLookback, sepPrice, "Sep: " + str.tostring(sepAboveATR, "#.#") + "×", style=label.style_label_right, color=color.new(#FF6D00, 80), textcolor=color.new(#FF6D00, 0), size=size.tiny)
+
+// v6: Sweet spot badge on Grade A signals
+plotshape(longGradeA, title="Long Grade A", location=location.belowbar, style=shape.triangleup, color=color.new(#00E676, 0), size=size.normal, text="LONG A")
+plotshape(longGradeB and not longGradeA, title="Long Grade B", location=location.belowbar, style=shape.triangleup, color=color.new(#00E676, 50), size=size.small, text="LONG B")
+plotshape(shortGradeA, title="Short Grade A", location=location.abovebar, style=shape.triangledown, color=color.new(#FF1744, 0), size=size.normal, text="SHORT A")
+plotshape(shortGradeB and not shortGradeA, title="Short Grade B", location=location.abovebar, style=shape.triangledown, color=color.new(#FF1744, 50), size=size.small, text="SHORT B")
+
+// First touch badge
+plotshape(shortGradeA and isFirstTouch, title="Short 1st", location=location.abovebar, style=shape.diamond, color=color.new(#FF6D00, 0), size=size.tiny, text="1st🎯", offset=-1)
+plotshape(longGradeA and isFirstTouch, title="Long 1st", location=location.belowbar, style=shape.diamond, color=color.new(#FF6D00, 0), size=size.tiny, text="1st🎯", offset=-1)
+
+// SL/T1/T2 lines
+if anyLong and showSL
+    line.new(bar_index - 1, longStop, bar_index + 10, longStop, color=color.new(#FF1744, 20), style=line.style_dashed, width=1)
+    label.new(bar_index + 10, longStop, "SL " + str.tostring(longStop, format.mintick), style=label.style_label_left, color=color.new(#FF1744, 80), textcolor=color.new(#FF1744, 0), size=size.small)
+if anyLong and showT1
+    line.new(bar_index, longT1, bar_index + 10, longT1, color=color.new(#00E676, 20), style=line.style_dashed, width=1)
+    label.new(bar_index + 10, longT1, "T1 " + str.tostring(longT1, format.mintick), style=label.style_label_left, color=color.new(#00E676, 80), textcolor=color.new(#00E676, 0), size=size.small)
+if anyLong and showT2
+    line.new(bar_index, longT2, bar_index + 15, longT2, color=color.new(#00BCD4, 20), style=line.style_dashed, width=1)
+    label.new(bar_index + 15, longT2, "T2 " + str.tostring(longT2, format.mintick), style=label.style_label_left, color=color.new(#00BCD4, 80), textcolor=color.new(#00BCD4, 0), size=size.small)
+if anyShort and showSL
+    line.new(bar_index - 1, shortStop, bar_index + 10, shortStop, color=color.new(#FF1744, 20), style=line.style_dashed, width=1)
+    label.new(bar_index + 10, shortStop, "SL " + str.tostring(shortStop, format.mintick), style=label.style_label_left, color=color.new(#FF1744, 80), textcolor=color.new(#FF1744, 0), size=size.small)
+if anyShort and showT1
+    line.new(bar_index, shortT1, bar_index + 10, shortT1, color=color.new(#FF1744, 40), style=line.style_dashed, width=1)
+    label.new(bar_index + 10, shortT1, "T1 " + str.tostring(shortT1, format.mintick), style=label.style_label_left, color=color.new(#FF1744, 80), textcolor=color.new(#FF1744, 0), size=size.small)
+if anyShort and showT2
+    line.new(bar_index, shortT2, bar_index + 15, shortT2, color=color.new(#FF1744, 60), style=line.style_dashed, width=1)
+    label.new(bar_index + 15, shortT2, "T2 " + str.tostring(shortT2, format.mintick), style=label.style_label_left, color=color.new(#FF1744, 80), textcolor=color.new(#FF1744, 0), size=size.small)
+
+if anyLong
+    label.new(bar_index, longEntry, "► ENTRY " + str.tostring(longEntry, format.mintick), style=label.style_label_lower_left, color=color.new(#00E676, 60), textcolor=color.white, size=size.small)
+if anyShort
+    label.new(bar_index, shortEntry, "► ENTRY " + str.tostring(shortEntry, format.mintick), style=label.style_label_upper_left, color=color.new(#FF1744, 60), textcolor=color.white, size=size.small)
+
+// Blocked trade entry/SL/T1/T2 lines (orange/gray to distinguish)
+if showBlocked and longBlocked
+    line.new(bar_index, longEntry, bar_index + 10, longEntry, color=color.new(#FF6D00, 40), style=line.style_dotted, width=1)
+    line.new(bar_index - 1, longStop, bar_index + 10, longStop, color=color.new(#FF1744, 60), style=line.style_dotted, width=1)
+    line.new(bar_index, longT1, bar_index + 10, longT1, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+    line.new(bar_index, longT2, bar_index + 15, longT2, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+if showBlocked and shortBlocked
+    line.new(bar_index, shortEntry, bar_index + 10, shortEntry, color=color.new(#FF6D00, 40), style=line.style_dotted, width=1)
+    line.new(bar_index - 1, shortStop, bar_index + 10, shortStop, color=color.new(#FF1744, 60), style=line.style_dotted, width=1)
+    line.new(bar_index, shortT1, bar_index + 10, shortT1, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+    line.new(bar_index, shortT2, bar_index + 15, shortT2, color=color.new(#FF6D00, 60), style=line.style_dotted, width=1)
+
+// Debug
+shortNearMiss = shortRejCandle and shortTrend and shortFresh and inSession and shortFiltersOk and not shortConfirm
+longNearMiss  = longRejCandle and longTrend and longFresh and inSession and longFiltersOk and not longConfirm
+
+// Build block reason strings
+if showBlocked and shortBlocked
+    string sReason = ""
+    if not shortCurvatureOk
+        sReason += "CURV "
+    if not rejBodyOk
+        sReason += "BODY "
+    if not shortStructureOk
+        sReason += "STRUCT "
+    if not shortTrendMomOk
+        sReason += "TMOM "
+    if not shortRBpass
+        sReason += "RBAND "
+    if not shortAngleOk
+        sReason += "ANGLE "
+    if shortOverextended
+        sReason += "OVEREXT "
+    if sReason == ""
+        sReason := "BLK"
+    label.new(bar_index, high, sReason, style=label.style_xcross, color=color.new(color.gray, 30), textcolor=color.orange, size=size.small)
+
+if showBlocked and longBlocked
+    string lReason = ""
+    if not longCurvatureOk
+        lReason += "CURV "
+    if not rejBodyOk
+        lReason += "BODY "
+    if not longStructureOk
+        lReason += "STRUCT "
+    if not longTrendMomOk
+        lReason += "TMOM "
+    if not longRBpass
+        lReason += "RBAND "
+    if not longAngleOk
+        lReason += "ANGLE "
+    if longOverextended
+        lReason += "OVEREXT "
+    if lReason == ""
+        lReason := "BLK"
+    label.new(bar_index, low, lReason, style=label.style_xcross, color=color.new(color.gray, 30), textcolor=color.orange, size=size.small)
+
+plotshape(showNearMiss and shortNearMiss, title="Short Near Miss", location=location.abovebar, style=shape.circle, color=color.new(color.yellow, 40), size=size.tiny, text="WAIT")
+plotshape(showNearMiss and longNearMiss, title="Long Near Miss", location=location.belowbar, style=shape.circle, color=color.new(color.yellow, 40), size=size.tiny, text="WAIT")
+
+// ─────────────────────────────────────────────
+// FILTER STATUS TABLE (top right)
+// ─────────────────────────────────────────────
+var table infoTable = table.new(position.top_right, 2, 14, bgcolor=color.new(#1a1a2e, 10), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and showFilters
+    table.cell(infoTable, 0, 0, "EMA Rejection v6", text_color=color.white, text_size=size.small, bgcolor=color.new(#16213e, 0))
+    table.cell(infoTable, 1, 0, "", bgcolor=color.new(#16213e, 0))
+
+    biasColor = ema50 < close ? color.new(#00E676, 0) : ema50 > close ? color.new(#FF1744, 0) : color.gray
+    table.cell(infoTable, 0, 1, "Bias", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, ema50 < close ? "BULL" : "BEAR", text_color=biasColor, text_size=size.tiny)
+    table.cell(infoTable, 0, 2, "EMA Slope", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, emaTrending ? (emaRising ? "▲ UP" : "▼ DOWN") : "── FLAT", text_color=emaTrending ? (emaRising ? color.new(#00E676, 0) : color.new(#FF1744, 0)) : color.yellow, text_size=size.tiny)
+    table.cell(infoTable, 0, 3, "Curvature", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, emaCurlUp ? "⤴ UP" : emaCurlDown ? "⤵ DOWN" : "── FLAT", text_color=emaCurlUp ? color.new(#00E676, 0) : emaCurlDown ? color.new(#FF1744, 0) : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 4, "Volume", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, volSpike ? "▲ SPIKE" : "── LOW", text_color=volSpike ? color.new(#00E676, 0) : color.yellow, text_size=size.tiny)
+    table.cell(infoTable, 0, 5, "RSI", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, str.tostring(rsi, "#.0") + (rsiRising ? " ▲" : rsiFalling ? " ▼" : ""), text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 6, "Trend Leg", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 6, trendLegBearish ? "▼ BEAR" : trendLegBullish ? "▲ BULL" : "── WEAK", text_color=trendLegBearish ? color.new(#FF1744, 0) : trendLegBullish ? color.new(#00E676, 0) : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 7, "Structure", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 7, lowerHighs ? "↘ LH" : higherLows ? "↗ HL" : "── NONE", text_color=lowerHighs ? color.new(#FF1744, 0) : higherLows ? color.new(#00E676, 0) : color.gray, text_size=size.tiny)
+
+    // v6: Separation with sweet spot indicator
+    currentSep = ema50 > close ? sepBelowATR : sepAboveATR
+    inSweet = currentSep >= sweetMin and currentSep <= sweetMax
+    isOverext = currentSep > overextCap
+    sepText = str.tostring(currentSep, "#.#") + "×" + (inSweet ? " 🎯" : isOverext ? " ⚠" : "")
+    sepColor = inSweet ? color.new(#FF6D00, 0) : isOverext ? color.new(#FF1744, 0) : currentSep >= rbMinATR ? color.new(#00E676, 0) : color.gray
+    table.cell(infoTable, 0, 8, "Separation", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 8, sepText, text_color=sepColor, text_size=size.tiny)
+
+    table.cell(infoTable, 0, 9, "Sweet Spot", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 9, str.tostring(sweetMin, "#.#") + "–" + str.tostring(sweetMax, "#.#") + "×", text_color=color.new(#FF6D00, 30), text_size=size.tiny)
+
+    table.cell(infoTable, 0, 10, "Touch #", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 10, isFirstTouch ? "✓ 1ST" : "RETESTED", text_color=isFirstTouch ? color.new(#FF6D00, 0) : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 11, "50 EMA", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 11, str.tostring(ema50, format.mintick), text_color=color.orange, text_size=size.tiny)
+    table.cell(infoTable, 0, 12, "Session", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 12, inSession ? "✓" : "✗", text_color=inSession ? color.new(#00E676, 0) : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 13, "Pending", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 13, tradeActive ? "⏳ " + str.tostring(tradeBars) + "b" : "──", text_color=tradeActive ? color.yellow : color.gray, text_size=size.tiny)
+
+// ─────────────────────────────────────────────
+// WIN RATE STATS TABLE (bottom left)
+// ─────────────────────────────────────────────
+var table statsTable = table.new(position.bottom_left, 4, 18, bgcolor=color.new(#1a1a2e, 10), border_color=color.new(color.gray, 70), border_width=1)
+
+wrColor(float wr) =>
+    wr >= 60 ? color.new(#00E676, 0) : wr >= 45 ? color.new(color.yellow, 0) : color.new(#FF1744, 0)
+
+if barstate.islast and showStats
+    table.cell(statsTable, 0, 0, "WIN RATE v6", text_color=color.white, text_size=size.small, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 1, 0, "Wins", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 2, 0, "Losses", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 3, 0, "Win %", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+
+    int totalWins = totalWinsT1 + totalWinsT2
+    float overallWR = totalTrades > 0 ? (float(totalWins) / float(totalTrades)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 1, "OVERALL (" + str.tostring(totalTrades) + ")", text_color=color.white, text_size=size.tiny)
+    table.cell(statsTable, 1, 1, str.tostring(totalWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 1, str.tostring(totalLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 1, str.tostring(overallWR, "#.1") + "%", text_color=wrColor(overallWR), text_size=size.tiny)
+
+    float t1WR = totalTrades > 0 ? (float(totalWinsT1) / float(totalTrades)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 2, "  Hit T1 only", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 2, str.tostring(totalWinsT1), text_color=color.new(#00E676, 40), text_size=size.tiny)
+    table.cell(statsTable, 2, 2, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 2, str.tostring(t1WR, "#.1") + "%", text_color=color.gray, text_size=size.tiny)
+
+    float t2WR = totalTrades > 0 ? (float(totalWinsT2) / float(totalTrades)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 3, "  Hit T2", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 3, str.tostring(totalWinsT2), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 3, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 3, str.tostring(t2WR, "#.1") + "%", text_color=color.gray, text_size=size.tiny)
+
+    table.cell(statsTable, 0, 4, "  Timeouts", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 4, str.tostring(totalTimeout), text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 2, 4, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 4, "", text_size=size.tiny)
+
+    // v6: Early exits
+    table.cell(statsTable, 0, 5, "  Early Exits", text_color=color.new(color.orange, 0), text_size=size.tiny)
+    table.cell(statsTable, 1, 5, str.tostring(totalEarlyEx), text_color=color.new(color.orange, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 5, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 5, "", text_size=size.tiny)
+
+    int aWins = aWinsT1 + aWinsT2
+    float aWR = aTotal > 0 ? (float(aWins) / float(aTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 6, "GRADE A (" + str.tostring(aTotal) + ")", text_color=color.white, text_size=size.tiny)
+    table.cell(statsTable, 1, 6, str.tostring(aWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 6, str.tostring(aLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 6, str.tostring(aWR, "#.1") + "%", text_color=wrColor(aWR), text_size=size.tiny)
+
+    int bWins = bWinsT1 + bWinsT2
+    float bWR = bTotal > 0 ? (float(bWins) / float(bTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 7, "GRADE B (" + str.tostring(bTotal) + ")", text_color=color.white, text_size=size.tiny)
+    table.cell(statsTable, 1, 7, str.tostring(bWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 7, str.tostring(bLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 7, str.tostring(bWR, "#.1") + "%", text_color=wrColor(bWR), text_size=size.tiny)
+
+    float longWR = longTotal > 0 ? (float(longWins) / float(longTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 8, "LONGS (" + str.tostring(longTotal) + ")", text_color=color.new(#00E676, 30), text_size=size.tiny)
+    table.cell(statsTable, 1, 8, str.tostring(longWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 8, str.tostring(longLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 8, str.tostring(longWR, "#.1") + "%", text_color=wrColor(longWR), text_size=size.tiny)
+
+    float shortWR = shortTotal > 0 ? (float(shortWins) / float(shortTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 9, "SHORTS (" + str.tostring(shortTotal) + ")", text_color=color.new(#FF1744, 30), text_size=size.tiny)
+    table.cell(statsTable, 1, 9, str.tostring(shortWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 9, str.tostring(shortLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 9, str.tostring(shortWR, "#.1") + "%", text_color=wrColor(shortWR), text_size=size.tiny)
+
+    float ftWR = ftTotal > 0 ? (float(ftWins) / float(ftTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 10, "1ST TOUCH (" + str.tostring(ftTotal) + ")", text_color=color.new(#FF6D00, 0), text_size=size.tiny)
+    table.cell(statsTable, 1, 10, str.tostring(ftWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 10, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 10, str.tostring(ftWR, "#.1") + "%", text_color=wrColor(ftWR), text_size=size.tiny)
+
+    // v6: Sweet spot stats
+    float sweetWR = sweetTotal > 0 ? (float(sweetWins) / float(sweetTotal)) * 100.0 : 0.0
+    table.cell(statsTable, 0, 11, "SWEET SPOT (" + str.tostring(sweetTotal) + ")", text_color=color.new(#FF6D00, 0), text_size=size.tiny)
+    table.cell(statsTable, 1, 11, str.tostring(sweetWins), text_color=color.new(#00E676, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 11, str.tostring(sweetLosses), text_color=color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 11, str.tostring(sweetWR, "#.1") + "%", text_color=wrColor(sweetWR), text_size=size.tiny)
+
+    float avgR = totalTrades > 0 ? totalRmult / float(totalTrades) : 0.0
+    table.cell(statsTable, 0, 12, "AVG R-MULT", text_color=color.white, text_size=size.tiny)
+    table.cell(statsTable, 1, 12, str.tostring(avgR, "#.##") + "R", text_color=avgR > 0 ? color.new(#00E676, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 12, "Tot: " + str.tostring(totalRmult, "#.#") + "R", text_color=totalRmult > 0 ? color.new(#00E676, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 12, "", text_size=size.tiny)
+
+    table.cell(statsTable, 0, 13, "AVG BARS", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 13, "W: " + str.tostring(avgBarsWin, "#.0"), text_color=color.new(#00E676, 40), text_size=size.tiny)
+    table.cell(statsTable, 2, 13, "L: " + str.tostring(avgBarsLoss, "#.0"), text_color=color.new(#FF1744, 40), text_size=size.tiny)
+    table.cell(statsTable, 3, 13, "", text_size=size.tiny)
+
+    // ── BLOCKED TRADE STATS ──
+    table.cell(statsTable, 0, 14, "", text_size=size.tiny)
+    table.cell(statsTable, 1, 14, "", text_size=size.tiny)
+    table.cell(statsTable, 2, 14, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 14, "", text_size=size.tiny)
+
+    int blkTotal = array.size(blkOutcome)
+    int blkWins = 0
+    int blkLosses2 = 0
+    int blkT1wins = 0
+    int blkT2wins = 0
+    float blkTotalR = 0.0
+    for i = 0 to blkTotal - 1
+        int boc = array.get(blkOutcome, i)
+        float brm = array.get(blkRmult, i)
+        blkTotalR += brm
+        if boc == 1
+            blkWins += 1
+            blkT1wins += 1
+        else if boc == 2
+            blkWins += 1
+            blkT2wins += 1
+        else if boc == 3
+            blkLosses2 += 1
+
+    float blkWR = blkTotal > 0 ? (float(blkWins) / float(blkTotal)) * 100.0 : 0.0
+    float blkAvgR = blkTotal > 0 ? blkTotalR / float(blkTotal) : 0.0
+
+    table.cell(statsTable, 0, 15, "BLOCKED (" + str.tostring(blkTotal) + ")", text_color=color.new(#FF6D00, 0), text_size=size.small, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 1, 15, str.tostring(blkWins), text_color=color.new(#00E676, 0), text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 2, 15, str.tostring(blkLosses2), text_color=color.new(#FF1744, 0), text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(statsTable, 3, 15, str.tostring(blkWR, "#.1") + "%", text_color=wrColor(blkWR), text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+
+    table.cell(statsTable, 0, 16, "  BLK T1/T2", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 16, str.tostring(blkT1wins) + "/" + str.tostring(blkT2wins), text_color=color.new(#FF6D00, 30), text_size=size.tiny)
+    table.cell(statsTable, 2, 16, "", text_size=size.tiny)
+    table.cell(statsTable, 3, 16, "", text_size=size.tiny)
+
+    table.cell(statsTable, 0, 17, "  BLK AVG R", text_color=color.gray, text_size=size.tiny)
+    table.cell(statsTable, 1, 17, str.tostring(blkAvgR, "#.##") + "R", text_color=blkAvgR > 0 ? color.new(#FF6D00, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 2, 17, "Tot: " + str.tostring(blkTotalR, "#.#") + "R", text_color=blkTotalR > 0 ? color.new(#FF6D00, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+    table.cell(statsTable, 3, 17, "", text_size=size.tiny)
+
+// ─────────────────────────────────────────────
+// TRADE LOG TABLE (bottom right)
+// ─────────────────────────────────────────────
+var table logTable = table.new(position.bottom_right, 9, 21, bgcolor=color.new(#1a1a2e, 10), border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast and showTradeLog
+    table.cell(logTable, 0, 0, "#", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 1, 0, "Dir", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 2, 0, "Gr", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 3, 0, "Entry", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 4, 0, "Result", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 5, 0, "R", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 6, 0, "Sep", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 7, 0, "RSI", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+    table.cell(logTable, 8, 0, "🎯", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#16213e, 0))
+
+    int logSize = array.size(resOutcome)
+    int logStart = math.max(0, logSize - 20)
+
+    for i = 0 to 19
+        int idx = logStart + i
+        int row = i + 1
+
+        if idx < logSize
+            int oc   = array.get(resOutcome, idx)
+            int dr   = array.get(resDir, idx)
+            int gr   = array.get(resGrade, idx)
+            float en = array.get(resEntry, idx)
+            float rm = array.get(resRmult, idx)
+            float sp = array.get(resSepATR, idx)
+            float rs = array.get(resRSI, idx)
+            int br   = array.get(resBars, idx)
+            int ft_v = array.get(resFirstT, idx)
+            int sw_v = array.get(resSweet, idx)
+
+            string dirText = dr == 1 ? "L" : "S"
+            color dirColor = dr == 1 ? color.new(#00E676, 0) : color.new(#FF1744, 0)
+            string grText = gr == 1 ? "A" : "B"
+            color grColor = gr == 1 ? color.white : color.gray
+
+            string ocText = oc == 2 ? "T2✓✓" : oc == 1 ? "T1✓" : oc == 3 ? "SL✗" : oc == 4 ? "EXIT" : "TO"
+            color ocColor = oc == 2 ? color.new(#00E676, 0) : oc == 1 ? color.new(#00E676, 40) : oc == 3 ? color.new(#FF1744, 0) : color.new(color.orange, 0)
+
+            // v6: sweet spot column
+            string sweetTag = sw_v == 1 ? "🎯" : ""
+            string ftTag = ft_v == 1 ? "•" : ""
+
+            table.cell(logTable, 0, row, str.tostring(idx + 1) + ftTag, text_color=ft_v == 1 ? color.new(#FF6D00, 0) : color.gray, text_size=size.tiny)
+            table.cell(logTable, 1, row, dirText, text_color=dirColor, text_size=size.tiny)
+            table.cell(logTable, 2, row, grText, text_color=grColor, text_size=size.tiny)
+            table.cell(logTable, 3, row, str.tostring(en, format.mintick), text_color=color.gray, text_size=size.tiny)
+            table.cell(logTable, 4, row, ocText + " " + str.tostring(br) + "b", text_color=ocColor, text_size=size.tiny)
+            table.cell(logTable, 5, row, str.tostring(rm, "#.##") + "R", text_color=rm > 0 ? color.new(#00E676, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+            table.cell(logTable, 6, row, str.tostring(sp, "#.#") + "×", text_color=sp >= sweetMin and sp <= sweetMax ? color.new(#FF6D00, 0) : color.gray, text_size=size.tiny)
+            table.cell(logTable, 7, row, str.tostring(rs, "#.0"), text_color=color.gray, text_size=size.tiny)
+            table.cell(logTable, 8, row, sweetTag, text_color=color.new(#FF6D00, 0), text_size=size.tiny)
+        else
+            for col = 0 to 8
+                table.cell(logTable, col, row, "", text_size=size.tiny)
+
+// ─────────────────────────────────────────────
+// BLOCKED TRADE LOG TABLE (middle right)
+// ─────────────────────────────────────────────
+var table blkLogTable = table.new(position.top_left, 7, 21, bgcolor=color.new(#1a1a2e, 10), border_color=color.new(#FF6D00, 70), border_width=1)
+
+if barstate.islast and showBlocked and showTradeLog
+    table.cell(blkLogTable, 0, 0, "#", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 1, 0, "Dir", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 2, 0, "Entry", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 3, 0, "Result", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 4, 0, "R", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 5, 0, "Sep", text_color=color.gray, text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+    table.cell(blkLogTable, 6, 0, "Reason", text_color=color.new(#FF6D00, 0), text_size=size.tiny, bgcolor=color.new(#3d1f00, 0))
+
+    int blkLogSize = array.size(blkOutcome)
+    int blkLogStart = math.max(0, blkLogSize - 20)
+
+    for i = 0 to 19
+        int bIdx2 = blkLogStart + i
+        int bRow = i + 1
+
+        if bIdx2 < blkLogSize
+            int boc   = array.get(blkOutcome, bIdx2)
+            int bdr   = array.get(blkDir, bIdx2)
+            float ben = array.get(blkEntry, bIdx2)
+            float brm = array.get(blkRmult, bIdx2)
+            float bsp = array.get(blkSepATR, bIdx2)
+            int bbr   = array.get(blkBars, bIdx2)
+            string brs = array.get(blkReason, bIdx2)
+
+            string bDirText = bdr == 1 ? "L" : "S"
+            color bDirColor = bdr == 1 ? color.new(#00E676, 0) : color.new(#FF1744, 0)
+
+            string bOcText = boc == 2 ? "T2" : boc == 1 ? "T1" : boc == 3 ? "SL" : "TO"
+            color bOcColor = boc == 2 ? color.new(#00E676, 0) : boc == 1 ? color.new(#00E676, 40) : boc == 3 ? color.new(#FF1744, 0) : color.new(color.gray, 0)
+
+            table.cell(blkLogTable, 0, bRow, str.tostring(bIdx2 + 1), text_color=color.new(#FF6D00, 30), text_size=size.tiny)
+            table.cell(blkLogTable, 1, bRow, bDirText, text_color=bDirColor, text_size=size.tiny)
+            table.cell(blkLogTable, 2, bRow, str.tostring(ben, format.mintick), text_color=color.gray, text_size=size.tiny)
+            table.cell(blkLogTable, 3, bRow, bOcText + " " + str.tostring(bbr) + "b", text_color=bOcColor, text_size=size.tiny)
+            table.cell(blkLogTable, 4, bRow, str.tostring(brm, "#.##") + "R", text_color=brm > 0 ? color.new(#FF6D00, 0) : color.new(#FF1744, 0), text_size=size.tiny)
+            table.cell(blkLogTable, 5, bRow, str.tostring(bsp, "#.#") + "x", text_color=color.gray, text_size=size.tiny)
+            table.cell(blkLogTable, 6, bRow, brs, text_color=color.new(#FF6D00, 0), text_size=size.tiny)
+        else
+            for col = 0 to 6
+                table.cell(blkLogTable, col, bRow, "", text_size=size.tiny)
+
+// ─────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────
+// ─── alert() based — ALL fire through ONE single alert ───
+// Setup: Right-click chart → Add Alert → Condition: "EMA Rejection v6"
+//        → "Any alert() function call" → Enable Sound/Pop-up → Create
+// That's it. One alert catches everything below.
+
+if longGradeA
+    alert("🟢 LONG GRADE A (Sweet Spot) | " + syminfo.ticker + " " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+
+if shortGradeA
+    alert("🔴 SHORT GRADE A (Sweet Spot) | " + syminfo.ticker + " " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+
+if longGradeB
+    alert("🟡 LONG GRADE B | " + syminfo.ticker + " " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+
+if shortGradeB
+    alert("🟡 SHORT GRADE B | " + syminfo.ticker + " " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)

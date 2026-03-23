@@ -1,0 +1,199 @@
+// This Pine Script™ source code is subject to the terms of the Mozilla Public License 2.0
+// © Liquidity Sweep Strategy v2
+//@version=5
+strategy("Liquidity Sweep v2", shorttitle="LiqSweep2", overlay=true,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     initial_capital=10000, commission_type=strategy.commission.percent,
+     commission_value=0.04, slippage=1, max_labels_count=500,
+     process_orders_on_close=false)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+
+// Structure
+pivotLen        = input.int(3,      "Pivot Lookback Length",        minval=1, maxval=20,  group="Structure")
+maxPivotAge     = input.int(200,    "Max Pivot Age (bars)",         minval=20, maxval=500, group="Structure")
+maxPivots       = input.int(10,     "Max Stored Pivots",            minval=1, maxval=30,  group="Structure")
+
+// Sweep Detection
+wickReject      = input.float(30.0, "Min Wick Rejection (%)",       minval=10, maxval=90, step=5, group="Sweep", tooltip="Sweep candle's close must be in this portion of the candle range to show rejection")
+
+// Risk Management
+rrRatio         = input.float(2.0,  "Take Profit R:R Ratio",       minval=0.5, step=0.25, group="Risk")
+slBuffer        = input.float(0.1,  "SL Buffer (% beyond wick)",   minval=0.0, step=0.05, group="Risk")
+
+// Optional Filters
+useEMA          = input.bool(false, "Use EMA Trend Filter",        group="Filters", tooltip="When ON: longs only above EMA, shorts only below. Turn OFF if getting 0 trades.")
+emaLen          = input.int(50,     "EMA Length",                   minval=10, group="Filters")
+useSession      = input.bool(false, "Use Session Filter",          group="Filters")
+sessionTime     = input.session("0930-1600", "Trading Session",    group="Filters")
+
+// Visuals
+bullColor       = input.color(color.new(#00C853, 0), "Bull Color", group="Visuals")
+bearColor       = input.color(color.new(#FF1744, 0), "Bear Color", group="Visuals")
+showPivots      = input.bool(true,  "Show Pivot Markers",          group="Visuals")
+showSLTP        = input.bool(true,  "Show SL/TP Lines",            group="Visuals")
+
+// ═══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+
+ema = ta.ema(close, emaLen)
+ph  = ta.pivothigh(high, pivotLen, pivotLen)
+pl  = ta.pivotlow(low, pivotLen, pivotLen)
+
+inSession = not useSession or (not na(time(timeframe.period, sessionTime)))
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 1: STORE SWING HIGHS & LOWS (liquidity pools)
+// ═══════════════════════════════════════════════════════════════
+
+var float[] swingHighs    = array.new_float(0)
+var int[]   swingHighBars = array.new_int(0)
+var float[] swingLows     = array.new_float(0)
+var int[]   swingLowBars  = array.new_int(0)
+
+if not na(ph)
+    array.unshift(swingHighs, ph)
+    array.unshift(swingHighBars, bar_index - pivotLen)
+    if array.size(swingHighs) > maxPivots
+        array.pop(swingHighs)
+        array.pop(swingHighBars)
+
+if not na(pl)
+    array.unshift(swingLows, pl)
+    array.unshift(swingLowBars, bar_index - pivotLen)
+    if array.size(swingLows) > maxPivots
+        array.pop(swingLows)
+        array.pop(swingLowBars)
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2: DETECT LIQUIDITY SWEEP
+// ═══════════════════════════════════════════════════════════════
+// Bullish: wick below swing low + close back above it = rejection
+// Bearish: wick above swing high + close back below it = rejection
+
+bullSweep  = false
+bearSweep  = false
+sweepWick  = 0.0
+
+candleRange = high - low
+
+// --- Bullish sweep ---
+if array.size(swingLows) > 0 and candleRange > 0
+    for i = 0 to array.size(swingLows) - 1
+        lvl    = array.get(swingLows, i)
+        lvlBar = array.get(swingLowBars, i)
+        age    = bar_index - lvlBar
+
+        if age > pivotLen and age <= maxPivotAge
+            if low < lvl and close > lvl
+                closePos = (close - low) / candleRange * 100
+                if closePos >= wickReject
+                    sweepWick  := low
+                    bullSweep  := true
+                    array.remove(swingLows, i)
+                    array.remove(swingLowBars, i)
+                    break
+
+// --- Bearish sweep ---
+if array.size(swingHighs) > 0 and candleRange > 0 and not bullSweep
+    for i = 0 to array.size(swingHighs) - 1
+        lvl    = array.get(swingHighs, i)
+        lvlBar = array.get(swingHighBars, i)
+        age    = bar_index - lvlBar
+
+        if age > pivotLen and age <= maxPivotAge
+            if high > lvl and close < lvl
+                closePos = (high - close) / candleRange * 100
+                if closePos >= wickReject
+                    sweepWick  := high
+                    bearSweep  := true
+                    array.remove(swingHighs, i)
+                    array.remove(swingHighBars, i)
+                    break
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3: FINAL SIGNALS
+// ═══════════════════════════════════════════════════════════════
+
+emaBullOK  = not useEMA or close > ema
+emaBearOK  = not useEMA or close < ema
+
+buySignal  = bullSweep and emaBullOK and inSession
+sellSignal = bearSweep and emaBearOK and inSession
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 4: ENTRIES & EXITS
+// ═══════════════════════════════════════════════════════════════
+
+var float activeSL = na
+var float activeTP = na
+
+bufVal = close * slBuffer / 100
+
+if buySignal and strategy.position_size <= 0
+    activeSL := sweepWick - bufVal
+    slDist   = close - activeSL
+    activeTP := close + slDist * rrRatio
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=activeSL, limit=activeTP)
+
+if sellSignal and strategy.position_size >= 0
+    activeSL := sweepWick + bufVal
+    slDist   = activeSL - close
+    activeTP := close - slDist * rrRatio
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=activeSL, limit=activeTP)
+
+if strategy.position_size == 0
+    activeSL := na
+    activeTP := na
+
+// ═══════════════════════════════════════════════════════════════
+// PLOTTING
+// ═══════════════════════════════════════════════════════════════
+
+plot(useEMA ? ema : na, "EMA", color=color.new(color.orange, 20), linewidth=2)
+
+plotshape(showPivots and not na(ph), title="Swing High", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.gray, 50), size=size.tiny, offset=-pivotLen)
+plotshape(showPivots and not na(pl), title="Swing Low", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.gray, 50), size=size.tiny, offset=-pivotLen)
+
+plotshape(buySignal, title="BUY", text="BUY", style=shape.labelup,
+     location=location.belowbar, color=bullColor, textcolor=color.white, size=size.normal)
+plotshape(sellSignal, title="SELL", text="SELL", style=shape.labeldown,
+     location=location.abovebar, color=bearColor, textcolor=color.white, size=size.normal)
+
+plot(showSLTP and strategy.position_size != 0 ? activeSL : na, "Stop Loss",
+     color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2)
+plot(showSLTP and strategy.position_size != 0 ? activeTP : na, "Take Profit",
+     color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2)
+
+bgcolor(buySignal ? color.new(bullColor, 90) : na)
+bgcolor(sellSignal ? color.new(bearColor, 90) : na)
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════
+alertcondition(buySignal,  title="Buy Signal",  message="LiqSweep BUY on {{ticker}} ({{interval}})")
+alertcondition(sellSignal, title="Sell Signal", message="LiqSweep SELL on {{ticker}} ({{interval}})")
+
+// ═══════════════════════════════════════════════════════════════
+// INFO TABLE
+// ═══════════════════════════════════════════════════════════════
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 85), border_width=1)
+if barstate.islast
+    posText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    posClr  = strategy.position_size > 0 ? bullColor : strategy.position_size < 0 ? bearColor : color.gray
+
+    table.cell(infoTable, 0, 0, "LiqSweep",    text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, posText,        text_color=posClr,      text_size=size.small)
+    table.cell(infoTable, 0, 1, "Trend",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(infoTable, 1, 1, close > ema ? "ABOVE EMA ▲" : "BELOW EMA ▼", text_color=close > ema ? bullColor : bearColor, text_size=size.tiny)
+    table.cell(infoTable, 0, 2, "SL",           text_color=color.gray,  text_size=size.tiny)
+    table.cell(infoTable, 1, 2, not na(activeSL) ? str.tostring(activeSL, format.mintick) : "—", text_color=color.red, text_size=size.tiny)
+    table.cell(infoTable, 0, 3, "TP",           text_color=color.gray,  text_size=size.tiny)
+    table.cell(infoTable, 1, 3, not na(activeTP) ? str.tostring(activeTP, format.mintick) : "—", text_color=color.green, text_size=size.tiny)

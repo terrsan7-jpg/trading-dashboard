@@ -1,0 +1,433 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// 5-Min ORB + Break & Retest v3 — Rebuilt for Profitability
+
+//@version=5
+indicator("ORB v3 — Options Scalper", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=100)
+
+// ─── INPUTS ───────────────────────────────────────────────────────────────────
+
+// Opening Range
+orbMinutes      = input.int(5,     "Opening Range Minutes",             minval=1, maxval=30, group="Opening Range")
+
+// Entry Mode
+entryMode       = input.string("Both", "Entry Mode", options=["Breakout Only", "Retest Only", "Both"], group="Entry")
+retestZoneMult  = input.float(0.25, "Retest Zone: x OR Range",         minval=0.05, step=0.05, group="Entry")
+holdBars        = input.int(1,     "Breakout Confirm Bars",             minval=1, maxval=5, group="Entry")
+bodyPct         = input.float(50,  "Min Candle Body % (momentum)",      minval=10, maxval=90, step=5, group="Entry")
+
+// Risk — based on OR range
+stopMult        = input.float(1.0, "Stop: x OR Range",                 minval=0.2, step=0.1, group="Risk")
+tgt1Mult        = input.float(0.75,"Target 1: x OR Range",             minval=0.25, step=0.05, group="Risk")
+tgt2Mult        = input.float(2.5, "Target 2: x OR Range (runner)",    minval=1.0, step=0.1, group="Risk")
+useTrail        = input.bool(true, "Enable Trailing Stop after T1",     group="Risk")
+trailMult       = input.float(0.5, "Trail Distance: x OR Range",       minval=0.1, step=0.1, group="Risk")
+
+// Filters
+useVwapBias     = input.bool(true, "VWAP Direction Filter",             group="Filters")
+useVolFilter    = input.bool(true, "Volume Spike Filter",               group="Filters")
+volSpikeX       = input.float(1.2, "Volume Spike Multiplier",           minval=1.0, step=0.1, group="Filters")
+volAvgLen       = input.int(20,    "Volume Avg Length",                  minval=1, group="Filters")
+minORRange      = input.float(0.0, "Min OR Range $ (0=off)",            minval=0, step=0.1, group="Filters")
+
+// Time Window
+sessionStartH   = input.int(9,    "Session Start Hour (ET)",           minval=0, maxval=23, group="Time")
+sessionStartM   = input.int(30,   "Session Start Min (ET)",            minval=0, maxval=59, group="Time")
+sessionEndH     = input.int(12,   "Session End Hour (ET)",             minval=0, maxval=23, group="Time")
+sessionEndM     = input.int(0,    "Session End Min (ET)",              minval=0, maxval=59, group="Time")
+
+// Signal Limits
+cooldownBars    = input.int(5,    "Min Bars Between Signals",          minval=1, group="Signals")
+maxSignals      = input.int(3,    "Max Signals Per Day",               minval=1, group="Signals")
+
+// ─── TIME HELPERS ─────────────────────────────────────────────────────────────
+
+etH = hour(time, "America/New_York")
+etM = minute(time, "America/New_York")
+etTotalMin = etH * 60 + etM
+
+sessionStart = sessionStartH * 60 + sessionStartM
+sessionEnd   = sessionEndH * 60 + sessionEndM
+orbEndMin    = sessionStart + orbMinutes
+
+isOrbPeriod  = etTotalMin >= sessionStart and etTotalMin < orbEndMin
+inSession    = etTotalMin >= orbEndMin and etTotalMin < sessionEnd
+newDay       = ta.change(time("D")) != 0
+
+// ─── CORE CALCS ───────────────────────────────────────────────────────────────
+
+vwapVal = ta.vwap(hlc3)
+volAvg  = ta.sma(volume, volAvgLen)
+
+// ─── OPENING RANGE DETECTION ─────────────────────────────────────────────────
+
+var float orbHigh = na
+var float orbLow  = na
+var bool  orbSet  = false
+
+if newDay
+    orbHigh := na
+    orbLow  := na
+    orbSet  := false
+
+if isOrbPeriod
+    orbHigh := na(orbHigh) ? high : math.max(orbHigh, high)
+    orbLow  := na(orbLow)  ? low  : math.min(orbLow, low)
+
+if not isOrbPeriod and not na(orbHigh) and not orbSet
+    orbSet := true
+
+orbReady  = orbSet and not na(orbHigh) and not na(orbLow)
+orbRange  = orbReady ? orbHigh - orbLow : 0.0
+orbMid    = orbReady ? (orbHigh + orbLow) / 2 : na
+orSizeOk  = minORRange == 0 or orbRange >= minORRange
+
+// ─── CANDLE QUALITY ──────────────────────────────────────────────────────────
+
+candleRange = high - low
+candleBody  = math.abs(close - open)
+bodyRatio   = candleRange > 0 ? (candleBody / candleRange) * 100 : 0
+isBullCandle = close > open
+isBearCandle = close < open
+strongBody  = bodyRatio >= bodyPct
+
+// ─── BREAKOUT TRACKING ──────────────────────────────────────────────────────
+
+var int barsAboveOR = 0
+var int barsBelowOR = 0
+var int dayBreakDir = 0
+var bool retestUsed = false
+var int  breakoutBar = 0
+
+if newDay
+    barsAboveOR := 0
+    barsBelowOR := 0
+    dayBreakDir := 0
+    retestUsed  := false
+    breakoutBar := 0
+
+if orbReady
+    barsAboveOR := close > orbHigh ? barsAboveOR + 1 : 0
+    barsBelowOR := close < orbLow  ? barsBelowOR + 1 : 0
+
+// Breakout confirmed: close beyond OR with strong candle
+bullBreakout = barsAboveOR >= holdBars and strongBody and isBullCandle
+bearBreakout = barsBelowOR >= holdBars and strongBody and isBearCandle
+
+// Record first breakout direction for retest
+if dayBreakDir == 0
+    if barsAboveOR >= holdBars
+        dayBreakDir := 1
+        breakoutBar := bar_index
+    if barsBelowOR >= holdBars
+        dayBreakDir := -1
+        breakoutBar := bar_index
+
+// ─── RETEST DETECTION ───────────────────────────────────────────────────────
+
+retestZone = orbRange * retestZoneMult
+barsAfterBreak = bar_index - breakoutBar
+
+// Bullish retest: after upside breakout, price pulls back to OR high zone, bounces
+bullRetest = orbReady and dayBreakDir == 1 and not retestUsed and
+     barsAfterBreak >= 3 and barsAfterBreak <= 60 and
+     low <= (orbHigh + retestZone) and
+     close > orbHigh and
+     isBullCandle and strongBody
+
+// Bearish retest: after downside breakout, price pops back to OR low zone, rejects
+bearRetest = orbReady and dayBreakDir == -1 and not retestUsed and
+     barsAfterBreak >= 3 and barsAfterBreak <= 60 and
+     high >= (orbLow - retestZone) and
+     close < orbLow and
+     isBearCandle and strongBody
+
+// ─── SIGNAL STATE ───────────────────────────────────────────────────────────
+
+var int   signalsToday   = 0
+var int   barsSinceSig   = 100
+var int   tradeDir       = 0
+var float entryPrice     = na
+var float stopPrice      = na
+var float trailPrice     = na
+var float tgt1Price      = na
+var float tgt2Price      = na
+var bool  tgt1Hit        = false
+var float bestPriceSince = na
+
+// Lines
+var line entryLine = na
+var line stopLine  = na
+var line tgt1Line  = na
+var line tgt2Line  = na
+
+// Win/Loss Tracker
+var int   totalTrades  = 0
+var int   wins         = 0
+var int   losses       = 0
+var float totalPnlPct  = 0.0
+var float bestWinPct   = 0.0
+var float worstLossPct = 0.0
+var float grossWinPct  = 0.0
+var float grossLossPct = 0.0
+
+if newDay
+    signalsToday := 0
+
+barsSinceSig += 1
+
+canSignal = inSession and barsSinceSig > cooldownBars and signalsToday < maxSignals and tradeDir == 0 and orSizeOk
+
+// ─── FILTERS ────────────────────────────────────────────────────────────────
+
+vwapLongOk  = not useVwapBias or close > vwapVal
+vwapShortOk = not useVwapBias or close < vwapVal
+volOk       = not useVolFilter or volume > (volAvg * volSpikeX)
+
+// ─── ENTRY LOGIC ────────────────────────────────────────────────────────────
+
+canBreakout = entryMode == "Breakout Only" or entryMode == "Both"
+canRetest   = entryMode == "Retest Only" or entryMode == "Both"
+
+longSignal  = canSignal and orbReady and volOk and vwapLongOk and
+     ((canBreakout and bullBreakout) or (canRetest and bullRetest))
+
+shortSignal = canSignal and orbReady and volOk and vwapShortOk and
+     ((canBreakout and bearBreakout) or (canRetest and bearRetest))
+
+// ─── EXECUTE ENTRIES ────────────────────────────────────────────────────────
+
+if longSignal
+    tradeDir       := 1
+    entryPrice     := close
+    stopPrice      := orbLow - (orbRange * (stopMult - 1.0))
+    trailPrice     := stopPrice
+    tgt1Price      := close + (orbRange * tgt1Mult)
+    tgt2Price      := close + (orbRange * tgt2Mult)
+    tgt1Hit        := false
+    bestPriceSince := close
+    signalsToday   += 1
+    barsSinceSig   := 0
+    if canRetest and bullRetest
+        retestUsed := true
+
+    entryLine := line.new(bar_index, entryPrice, bar_index + 50, entryPrice, color=color.white, style=line.style_dashed, width=1)
+    stopLine  := line.new(bar_index, stopPrice,  bar_index + 50, stopPrice,  color=color.red,   style=line.style_dotted, width=2)
+    tgt1Line  := line.new(bar_index, tgt1Price,  bar_index + 50, tgt1Price,  color=color.lime,  style=line.style_dotted, width=1)
+    tgt2Line  := line.new(bar_index, tgt2Price,  bar_index + 50, tgt2Price,  color=color.aqua,  style=line.style_dotted, width=1)
+    label.new(bar_index, low - (orbRange * 0.15), "CALL ▲", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal)
+
+if shortSignal
+    tradeDir       := -1
+    entryPrice     := close
+    stopPrice      := orbHigh + (orbRange * (stopMult - 1.0))
+    trailPrice     := stopPrice
+    tgt1Price      := close - (orbRange * tgt1Mult)
+    tgt2Price      := close - (orbRange * tgt2Mult)
+    tgt1Hit        := false
+    bestPriceSince := close
+    signalsToday   += 1
+    barsSinceSig   := 0
+    if canRetest and bearRetest
+        retestUsed := true
+
+    entryLine := line.new(bar_index, entryPrice, bar_index + 50, entryPrice, color=color.white, style=line.style_dashed, width=1)
+    stopLine  := line.new(bar_index, stopPrice,  bar_index + 50, stopPrice,  color=color.red,   style=line.style_dotted, width=2)
+    tgt1Line  := line.new(bar_index, tgt1Price,  bar_index + 50, tgt1Price,  color=color.lime,  style=line.style_dotted, width=1)
+    tgt2Line  := line.new(bar_index, tgt2Price,  bar_index + 50, tgt2Price,  color=color.aqua,  style=line.style_dotted, width=1)
+    label.new(bar_index, high + (orbRange * 0.15), "PUT ▼", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal)
+
+// ─── LONG TRADE MANAGEMENT ──────────────────────────────────────────────────
+
+if tradeDir == 1
+    bestPriceSince := math.max(bestPriceSince, high)
+
+    // T1 hit — move stop to breakeven
+    if not tgt1Hit and high >= tgt1Price
+        tgt1Hit := true
+        if useTrail
+            trailPrice := math.max(trailPrice, entryPrice)
+        label.new(bar_index, high, "T1 ✓", style=label.style_label_down, color=color.lime, textcolor=color.black, size=size.tiny)
+
+    // Trail: after T1, trail using OR range distance below best high
+    if useTrail and tgt1Hit
+        newTrail = bestPriceSince - (orbRange * trailMult)
+        if newTrail > trailPrice
+            trailPrice := newTrail
+
+    activeStop = tgt1Hit and useTrail ? trailPrice : stopPrice
+    if not na(stopLine)
+        line.set_xy2(stopLine, bar_index, activeStop)
+
+    // T2 hit — full exit
+    if high >= tgt2Price
+        exitPnl      = (tgt2Price - entryPrice) / entryPrice * 100
+        totalTrades  += 1
+        totalPnlPct  += exitPnl
+        wins         += 1
+        grossWinPct  += exitPnl
+        bestWinPct   := math.max(bestWinPct, exitPnl)
+        label.new(bar_index, high, "T2 EXIT\n+" + str.tostring(exitPnl, "#.##") + "%", style=label.style_label_down, color=color.aqua, textcolor=color.black, size=size.small)
+        tradeDir     := 0
+        entryPrice   := na
+
+    // Stop hit
+    else if low <= activeStop
+        exitPnl      = (activeStop - entryPrice) / entryPrice * 100
+        totalTrades  += 1
+        totalPnlPct  += exitPnl
+        if exitPnl > 0
+            wins     += 1
+            grossWinPct += exitPnl
+            bestWinPct := math.max(bestWinPct, exitPnl)
+        else
+            losses   += 1
+            grossLossPct += math.abs(exitPnl)
+            worstLossPct := math.min(worstLossPct, exitPnl)
+        exitClr = exitPnl > 0 ? color.lime : color.orange
+        label.new(bar_index, low, "EXIT\n" + (exitPnl >= 0 ? "+" : "") + str.tostring(exitPnl, "#.##") + "%", style=label.style_label_up, color=exitClr, textcolor=color.black, size=size.small)
+        tradeDir     := 0
+        entryPrice   := na
+
+// ─── SHORT TRADE MANAGEMENT ─────────────────────────────────────────────────
+
+if tradeDir == -1
+    bestPriceSince := math.min(bestPriceSince, low)
+
+    if not tgt1Hit and low <= tgt1Price
+        tgt1Hit := true
+        if useTrail
+            trailPrice := math.min(trailPrice, entryPrice)
+        label.new(bar_index, low, "T1 ✓", style=label.style_label_up, color=color.lime, textcolor=color.black, size=size.tiny)
+
+    if useTrail and tgt1Hit
+        newTrail = bestPriceSince + (orbRange * trailMult)
+        if newTrail < trailPrice
+            trailPrice := newTrail
+
+    activeStop = tgt1Hit and useTrail ? trailPrice : stopPrice
+    if not na(stopLine)
+        line.set_xy2(stopLine, bar_index, activeStop)
+
+    if low <= tgt2Price
+        exitPnl      = (entryPrice - tgt2Price) / entryPrice * 100
+        totalTrades  += 1
+        totalPnlPct  += exitPnl
+        wins         += 1
+        grossWinPct  += exitPnl
+        bestWinPct   := math.max(bestWinPct, exitPnl)
+        label.new(bar_index, low, "T2 EXIT\n+" + str.tostring(exitPnl, "#.##") + "%", style=label.style_label_up, color=color.aqua, textcolor=color.black, size=size.small)
+        tradeDir     := 0
+        entryPrice   := na
+
+    else if high >= activeStop
+        exitPnl      = (entryPrice - activeStop) / entryPrice * 100
+        totalTrades  += 1
+        totalPnlPct  += exitPnl
+        if exitPnl > 0
+            wins     += 1
+            grossWinPct += exitPnl
+            bestWinPct := math.max(bestWinPct, exitPnl)
+        else
+            losses   += 1
+            grossLossPct += math.abs(exitPnl)
+            worstLossPct := math.min(worstLossPct, exitPnl)
+        exitClr = exitPnl > 0 ? color.lime : color.orange
+        label.new(bar_index, high, "EXIT\n" + (exitPnl >= 0 ? "+" : "") + str.tostring(exitPnl, "#.##") + "%", style=label.style_label_down, color=exitClr, textcolor=color.black, size=size.small)
+        tradeDir     := 0
+        entryPrice   := na
+
+// ─── FORCE EXIT AT SESSION END ──────────────────────────────────────────────
+
+if tradeDir != 0 and etTotalMin >= sessionEnd
+    exitPnl = tradeDir == 1 ? (close - entryPrice) / entryPrice * 100 : (entryPrice - close) / entryPrice * 100
+    totalTrades += 1
+    totalPnlPct += exitPnl
+    if exitPnl > 0
+        wins += 1
+        grossWinPct += exitPnl
+        bestWinPct := math.max(bestWinPct, exitPnl)
+    else
+        losses += 1
+        grossLossPct += math.abs(exitPnl)
+        worstLossPct := math.min(worstLossPct, exitPnl)
+    label.new(bar_index, tradeDir == 1 ? high : low, "EOD\n" + (exitPnl >= 0 ? "+" : "") + str.tostring(exitPnl, "#.##") + "%", style=tradeDir == 1 ? label.style_label_down : label.style_label_up, color=color.gray, textcolor=color.white, size=size.small)
+    tradeDir   := 0
+    entryPrice := na
+
+// ─── PLOTS ──────────────────────────────────────────────────────────────────
+
+// Opening Range levels
+plot(orbReady and (inSession or isOrbPeriod) ? orbHigh : na, "OR High", color=color.new(color.aqua, 0), linewidth=2, style=plot.style_linebr)
+plot(orbReady and (inSession or isOrbPeriod) ? orbLow  : na, "OR Low",  color=color.new(color.fuchsia, 0), linewidth=2, style=plot.style_linebr)
+plot(orbReady and inSession ? orbMid : na, "OR Mid", color=color.new(color.gray, 60), linewidth=1, style=plot.style_linebr)
+
+// VWAP
+plot(vwapVal, "VWAP", color=color.new(color.orange, 20), linewidth=2)
+
+// ─── BACKGROUND ─────────────────────────────────────────────────────────────
+
+bgColor = isOrbPeriod ? color.new(color.blue, 92) : inSession ? na : color.new(color.gray, 95)
+bgcolor(bgColor, title="Session Background")
+
+// ─── WIN RATE DASHBOARD ─────────────────────────────────────────────────────
+
+var table dash = table.new(position.top_right, 2, 12, bgcolor=color.new(#1a1a2e, 10), border_width=1, border_color=color.new(color.gray, 50))
+
+winRate     = totalTrades > 0 ? (wins * 1.0 / totalTrades) * 100 : 0.0
+avgPnl      = totalTrades > 0 ? totalPnlPct / totalTrades : 0.0
+avgWin      = wins > 0 ? grossWinPct / wins : 0.0
+avgLoss     = losses > 0 ? grossLossPct / losses : 0.0
+pf          = grossLossPct > 0 ? grossWinPct / grossLossPct : 0.0
+expectancy  = totalTrades > 0 ? (winRate / 100 * avgWin) - ((1 - winRate / 100) * avgLoss) : 0.0
+
+statusText = tradeDir == 1 ? "LONG (CALL)" : tradeDir == -1 ? "SHORT (PUT)" : "FLAT"
+statusClr  = tradeDir == 1 ? color.lime : tradeDir == -1 ? color.red : color.gray
+
+sessionTxt = isOrbPeriod ? "BUILDING OR" : inSession ? "● ACTIVE" : "CLOSED"
+sessionClr = isOrbPeriod ? color.aqua : inSession ? color.lime : color.red
+
+winRateClr = winRate >= 55 ? color.lime : winRate >= 40 ? color.yellow : color.red
+pfClr      = pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red
+
+if barstate.islast
+    table.cell(dash, 0, 0, "ORB v3",         text_color=color.aqua,  text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, "SCALPER",         text_color=color.aqua,  text_size=size.small)
+
+    table.cell(dash, 0, 1, "Position",        text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, statusText,         text_color=statusClr,  text_size=size.small)
+
+    table.cell(dash, 0, 2, "Session",         text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, sessionTxt,         text_color=sessionClr, text_size=size.small)
+
+    table.cell(dash, 0, 3, "Signals",         text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(signalsToday) + " / " + str.tostring(maxSignals), text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 4, "OR Range",        text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, orbReady ? "$" + str.tostring(orbRange, "#.##") : "—", text_color=color.aqua, text_size=size.small)
+
+    table.cell(dash, 0, 5, "── TRACKER ──",   text_color=color.gray,  text_size=size.tiny, text_halign=text.align_left)
+    table.cell(dash, 1, 5, "",                 text_color=color.gray,  text_size=size.tiny)
+
+    table.cell(dash, 0, 6, "Trades",          text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 6, str.tostring(totalTrades) + "  (" + str.tostring(wins) + "W / " + str.tostring(losses) + "L)", text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 7, "Win Rate",        text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 7, str.tostring(winRate, "#.#") + "%", text_color=winRateClr, text_size=size.small)
+
+    table.cell(dash, 0, 8, "Profit Factor",   text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 8, str.tostring(pf, "#.##"), text_color=pfClr, text_size=size.small)
+
+    table.cell(dash, 0, 9, "Avg Win / Loss",  text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 9, "+" + str.tostring(avgWin, "#.##") + "% / -" + str.tostring(avgLoss, "#.##") + "%", text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 10, "Total P&L",      text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 10, (totalPnlPct >= 0 ? "+" : "") + str.tostring(totalPnlPct, "#.##") + "%", text_color=totalPnlPct >= 0 ? color.lime : color.red, text_size=size.small)
+
+    table.cell(dash, 0, 11, "Expectancy",     text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 11, (expectancy >= 0 ? "+" : "") + str.tostring(expectancy, "#.###") + "%", text_color=expectancy >= 0 ? color.lime : color.red, text_size=size.small)
+
+// ─── ALERTS ─────────────────────────────────────────────────────────────────
+
+alertcondition(longSignal,  title="CALL Entry", message="ORB CALL ▲ — Bullish breakout confirmed")
+alertcondition(shortSignal, title="PUT Entry",  message="ORB PUT ▼ — Bearish breakout confirmed")
+alertcondition(tradeDir[1] != 0 and tradeDir == 0, title="EXIT", message="ORB Trade Exit triggered")
